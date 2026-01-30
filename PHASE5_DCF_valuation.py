@@ -148,12 +148,23 @@ class CachedTickerData:
                 }
                 _CACHE_TIMESTAMP[self.symbol] = time.time()
             except Exception as e:
-                # Return empty data on error
-                self._info = {}
-                self._financials = pd.DataFrame()
-                self._balance_sheet = pd.DataFrame()
-                self._cashflow = pd.DataFrame()
-                raise e
+                # Log error but don't crash - return empty data
+                error_msg = str(e)
+                if "rate" in error_msg.lower() or "429" in error_msg or "YFRateLimitError" in str(type(e).__name__):
+                    # Rate limit - set empty data and mark as loaded to prevent retry loops
+                    self._info = {}
+                    self._financials = pd.DataFrame()
+                    self._balance_sheet = pd.DataFrame()
+                    self._cashflow = pd.DataFrame()
+                    self._loaded = True  # Mark as loaded even though failed, to prevent retry loop
+                    # Don't raise - just use empty data
+                else:
+                    # Other error - set empty data but re-raise
+                    self._info = {}
+                    self._financials = pd.DataFrame()
+                    self._balance_sheet = pd.DataFrame()
+                    self._cashflow = pd.DataFrame()
+                    raise e
     
     @property
     def info(self):
@@ -4926,10 +4937,15 @@ if mode == "Listed Company (Yahoo Finance)":
                     # Use parameters set BEFORE Fetch button (from the expandable section)
                     # No need for Apply Changes button - parameters are already set!
                     
-                    # Get current price
-                    stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
-                    info = stock.info
-                    current_price = info.get('currentPrice', 0)
+                    # Get current price (with rate limit protection)
+                    current_price = 0
+                    try:
+                        stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
+                        info = stock.info
+                        current_price = info.get('currentPrice', 0) or info.get('regularMarketPrice', 0) or info.get('previousClose', 0)
+                    except Exception as e:
+                        st.warning("⚠️ Could not fetch current market price. Using 0 for comparison calculations.")
+                        current_price = 0
                     
                     # Calculate Ke for bank valuations
                     wacc_details = calculate_wacc(financials, tax_rate, peer_tickers=None)
@@ -5593,10 +5609,20 @@ if mode == "Listed Company (Yahoo Finance)":
                 except Exception as e:
                     st.error(f"PDF Generation Error: {str(e)}")
                 
-                # Get current price for comparison
-                stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
-                info = stock.info
-                current_price = info.get('currentPrice', 0)
+                # Get current price for comparison (with rate limit protection)
+                current_price = 0
+                try:
+                    stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
+                    info = stock.info
+                    current_price = info.get('currentPrice', 0) or info.get('regularMarketPrice', 0) or info.get('previousClose', 0)
+                except Exception as e:
+                    st.warning("⚠️ Could not fetch current market price (rate limit or data unavailable). Using last known price if available.")
+                    # Try to get from cached data
+                    try:
+                        if hasattr(stock, '_info') and stock._info:
+                            current_price = stock._info.get('currentPrice', 0) or stock._info.get('previousClose', 0)
+                    except:
+                        current_price = 0
                 
                 # Calculate comparative valuation EARLY for Forward P/E display
                 comp_results = None
