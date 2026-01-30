@@ -4855,7 +4855,9 @@ if mode == "Listed Company (Yahoo Finance)":
         with col_fetch2:
             if st.button("🔄 Reset Cache", help="Clear cached data to force fresh fetch"):
                 st.cache_data.clear()
-                st.success("✅ Cache cleared!")
+                clear_ticker_cache()
+                st.session_state.show_results_listed = False  # Reset results too
+                st.success("✅ Cache cleared! Please click 'Fetch & Analyze' again.")
                 st.rerun()
         
         if st.session_state.get('show_results_listed', False):
@@ -5609,20 +5611,23 @@ if mode == "Listed Company (Yahoo Finance)":
                 except Exception as e:
                     st.error(f"PDF Generation Error: {str(e)}")
                 
-                # Get current price for comparison (with rate limit protection)
+                # Get current price for comparison (use already-fetched data to avoid duplicate API call)
                 current_price = 0
                 try:
-                    stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
-                    info = stock.info
-                    current_price = info.get('currentPrice', 0) or info.get('regularMarketPrice', 0) or info.get('previousClose', 0)
+                    # First try from yahoo_data that was already fetched
+                    if 'info' in yahoo_data and yahoo_data['info']:
+                        current_price = yahoo_data['info'].get('currentPrice', 0) or \
+                                       yahoo_data['info'].get('regularMarketPrice', 0) or \
+                                       yahoo_data['info'].get('previousClose', 0)
+                    
+                    # If still 0, try one more fetch with error handling
+                    if current_price == 0:
+                        stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
+                        info = stock.info
+                        current_price = info.get('currentPrice', 0) or info.get('regularMarketPrice', 0) or info.get('previousClose', 0)
                 except Exception as e:
-                    st.warning("⚠️ Could not fetch current market price (rate limit or data unavailable). Using last known price if available.")
-                    # Try to get from cached data
-                    try:
-                        if hasattr(stock, '_info') and stock._info:
-                            current_price = stock._info.get('currentPrice', 0) or stock._info.get('previousClose', 0)
-                    except:
-                        current_price = 0
+                    st.warning("⚠️ Could not fetch current market price (rate limit or data unavailable).")
+                    current_price = 0
                 
                 # Calculate comparative valuation EARLY for Forward P/E display
                 comp_results = None
@@ -5633,8 +5638,8 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.warning(f"Could not calculate comparative valuation: {str(e)}")
                 
                 # Key Metrics with Current Price and P/E
-                # Get current P/E if available
-                current_pe = info.get('trailingPE', 0)
+                # Get current P/E from yahoo_data info
+                current_pe = yahoo_data['info'].get('trailingPE', 0) if 'info' in yahoo_data else 0
                 current_eps = (financials['nopat'][0] * 100000) / shares if shares > 0 and financials['nopat'][0] > 0 else 0
                 
                 st.markdown("### 📊 Key Valuation Metrics")
