@@ -19,48 +19,9 @@ from peer_comparison_charts import create_peer_comparison_dashboard
 # ================================
 st.markdown("""
 <style>
-    /* Prevent text truncation in ALL elements */
-    * {
-        text-overflow: clip !important;
+    /* Prevent text truncation in metrics */
+    [data-testid="stMetricLabel"], [data-testid="stMetricValue"] {
         white-space: normal !important;
-        overflow: visible !important;
-    }
-    
-    /* Specifically for metrics */
-    [data-testid="stMetric"] * {
-        text-overflow: clip !important;
-        white-space: normal !important;
-        overflow: visible !important;
-    }
-    
-    [data-testid="stMetricLabel"] {
-        text-overflow: clip !important;
-        white-space: normal !important;
-        overflow: visible !important;
-        word-wrap: break-word !important;
-    }
-    
-    [data-testid="stMetricValue"] {
-        text-overflow: clip !important;
-        white-space: normal !important;
-        overflow: visible !important;
-        word-wrap: break-word !important;
-    }
-    
-    [data-testid="stMetricDelta"] {
-        text-overflow: clip !important;
-        white-space: normal !important;
-        overflow: visible !important;
-    }
-    
-    /* For columns */
-    .stColumn {
-        overflow: visible !important;
-    }
-    
-    /* For all text elements */
-    p, span, div, label {
-        text-overflow: clip !important;
         overflow: visible !important;
     }
 </style>
@@ -148,23 +109,12 @@ class CachedTickerData:
                 }
                 _CACHE_TIMESTAMP[self.symbol] = time.time()
             except Exception as e:
-                # Log error but don't crash - return empty data
-                error_msg = str(e)
-                if "rate" in error_msg.lower() or "429" in error_msg or "YFRateLimitError" in str(type(e).__name__):
-                    # Rate limit - set empty data and mark as loaded to prevent retry loops
-                    self._info = {}
-                    self._financials = pd.DataFrame()
-                    self._balance_sheet = pd.DataFrame()
-                    self._cashflow = pd.DataFrame()
-                    self._loaded = True  # Mark as loaded even though failed, to prevent retry loop
-                    # Don't raise - just use empty data
-                else:
-                    # Other error - set empty data but re-raise
-                    self._info = {}
-                    self._financials = pd.DataFrame()
-                    self._balance_sheet = pd.DataFrame()
-                    self._cashflow = pd.DataFrame()
-                    raise e
+                # Return empty data on error
+                self._info = {}
+                self._financials = pd.DataFrame()
+                self._balance_sheet = pd.DataFrame()
+                self._cashflow = pd.DataFrame()
+                raise e
     
     @property
     def info(self):
@@ -4299,16 +4249,8 @@ if 'show_results_listed' not in st.session_state:
     st.session_state.show_results_listed = False
 if 'show_results_unlisted' not in st.session_state:
     st.session_state.show_results_unlisted = False
-if 'fetched_nse_peers' not in st.session_state:
-    st.session_state.fetched_nse_peers = {}
-if 'fetched_bse_peers' not in st.session_state:
-    st.session_state.fetched_bse_peers = {}
-if 'fetch_status' not in st.session_state:
-    st.session_state.fetch_status = {}
 if 'current_ticker' not in st.session_state:
     st.session_state.current_ticker = None
-if 'yahoo_request_count' not in st.session_state:
-    st.session_state.yahoo_request_count = 0
 
 # Cache status display and control
 col_cache1, col_cache2 = st.columns([3, 1])
@@ -4340,7 +4282,7 @@ if mode == "Listed Company (Yahoo Finance)":
         ticker_placeholder = "e.g., RELIANCE" if exchange == "NSE" else "e.g., RELIANCE"
         ticker = st.text_input(ticker_label, placeholder=ticker_placeholder)
         
-        # Reset analysis state when ticker changes
+        # Reset analysis when ticker changes
         if ticker and ticker != st.session_state.get('current_ticker'):
             st.session_state.current_ticker = ticker
             st.session_state.show_results_listed = False
@@ -4499,9 +4441,8 @@ if mode == "Listed Company (Yahoo Finance)":
                                     'bse_display': ", ".join(bse_list)
                                 }
                                 
-                                # No st.rerun() - let Streamlit handle the update naturally
-                                st.success(f"✅ Peers fetched successfully! NSE: {len(nse_list)}, BSE: {len(bse_list)}")
-                                st.info("💡 Peer tickers have been populated below. Click 'Fetch & Analyze' to proceed.")
+                                st.success(f"✅ Peers fetched! NSE: {len(nse_list)}, BSE: {len(bse_list)}")
+                                st.info("💡 Peer tickers populated below. Click 'Fetch & Analyze' to proceed.")
                             else:
                                 st.session_state.fetch_status[ticker_key] = {
                                     'success': False,
@@ -4855,9 +4796,7 @@ if mode == "Listed Company (Yahoo Finance)":
         with col_fetch2:
             if st.button("🔄 Reset Cache", help="Clear cached data to force fresh fetch"):
                 st.cache_data.clear()
-                clear_ticker_cache()
-                st.session_state.show_results_listed = False  # Reset results too
-                st.success("✅ Cache cleared! Please click 'Fetch & Analyze' again.")
+                st.success("✅ Cache cleared!")
                 st.rerun()
         
         if st.session_state.get('show_results_listed', False):
@@ -4939,15 +4878,10 @@ if mode == "Listed Company (Yahoo Finance)":
                     # Use parameters set BEFORE Fetch button (from the expandable section)
                     # No need for Apply Changes button - parameters are already set!
                     
-                    # Get current price (with rate limit protection)
-                    current_price = 0
-                    try:
-                        stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
-                        info = stock.info
-                        current_price = info.get('currentPrice', 0) or info.get('regularMarketPrice', 0) or info.get('previousClose', 0)
-                    except Exception as e:
-                        st.warning("⚠️ Could not fetch current market price. Using 0 for comparison calculations.")
-                        current_price = 0
+                    # Get current price
+                    stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
+                    info = stock.info
+                    current_price = info.get('currentPrice', 0)
                     
                     # Calculate Ke for bank valuations
                     wacc_details = calculate_wacc(financials, tax_rate, peer_tickers=None)
@@ -5325,7 +5259,7 @@ if mode == "Listed Company (Yahoo Finance)":
                         else:
                             st.warning("P/B ROE model calculation failed")
                     
-                    with tab5:
+                    with tab3:  # Summary
                         if rel_val:
                             st.subheader("Relative Valuation (Peer-Based)")
                             
@@ -5398,7 +5332,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     # Bank DCF Tab (if calculated)
                     if bank_dcf_result:
-                        with tab6:
+                        with tab5:  # Sensitivity
                             st.subheader("🏦 Bank FCFE Valuation (Equity DCF)")
                             st.success("✅ Using proper FCFE methodology - NOT FCFF!")
                             
@@ -5611,23 +5545,10 @@ if mode == "Listed Company (Yahoo Finance)":
                 except Exception as e:
                     st.error(f"PDF Generation Error: {str(e)}")
                 
-                # Get current price for comparison (use already-fetched data to avoid duplicate API call)
-                current_price = 0
-                try:
-                    # First try from yahoo_data that was already fetched
-                    if 'info' in yahoo_data and yahoo_data['info']:
-                        current_price = yahoo_data['info'].get('currentPrice', 0) or \
-                                       yahoo_data['info'].get('regularMarketPrice', 0) or \
-                                       yahoo_data['info'].get('previousClose', 0)
-                    
-                    # If still 0, try one more fetch with error handling
-                    if current_price == 0:
-                        stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
-                        info = stock.info
-                        current_price = info.get('currentPrice', 0) or info.get('regularMarketPrice', 0) or info.get('previousClose', 0)
-                except Exception as e:
-                    st.warning("⚠️ Could not fetch current market price (rate limit or data unavailable).")
-                    current_price = 0
+                # Get current price for comparison
+                stock = get_cached_ticker(get_ticker_with_exchange(ticker, exchange_suffix))
+                info = stock.info
+                current_price = info.get('currentPrice', 0)
                 
                 # Calculate comparative valuation EARLY for Forward P/E display
                 comp_results = None
@@ -5638,13 +5559,12 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.warning(f"Could not calculate comparative valuation: {str(e)}")
                 
                 # Key Metrics with Current Price and P/E
-                # Get current P/E from yahoo_data info
-                current_pe = yahoo_data['info'].get('trailingPE', 0) if 'info' in yahoo_data else 0
+                # Get current P/E if available
+                current_pe = info.get('trailingPE', 0)
                 current_eps = (financials['nopat'][0] * 100000) / shares if shares > 0 and financials['nopat'][0] > 0 else 0
                 
                 st.markdown("### 📊 Key Valuation Metrics")
                 
-                # Row 1: Price metrics
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("📊 Current Price", f"₹ {current_price:.2f}")
@@ -5654,7 +5574,6 @@ if mode == "Listed Company (Yahoo Finance)":
                 with col3:
                     st.metric("Current P/E", f"{current_pe:.2f}x" if current_pe > 0 else "N/A")
                 
-                # Row 2: Additional metrics
                 col4, col5, col6 = st.columns(3)
                 with col4:
                     st.metric("Current EPS", f"₹ {current_eps:.2f}" if current_eps > 0 else "N/A")
@@ -5670,8 +5589,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     fpe = comp_results['forward_pe']
                     
-                    # Row 1: EPS metrics
-                    col_fpe1, col_fpe2, col_fpe3 = st.columns(3)
+                    col_fpe1, col_fpe2, col_fpe3, col_fpe4, col_fpe5 = st.columns(5)
                     
                     with col_fpe1:
                         st.metric("Current EPS", f"₹{fpe.get('current_eps', 0):.2f}")
@@ -5683,9 +5601,6 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     with col_fpe3:
                         st.metric("Peer Avg P/E", f"{comp_results['multiples_stats']['pe']['average']:.2f}x" if 'pe' in comp_results['multiples_stats'] else "N/A")
-                    
-                    # Row 2: Fair value metrics
-                    col_fpe4, col_fpe5 = st.columns(2)
                     
                     with col_fpe4:
                         st.metric("Forward Fair Value (Avg)", f"₹{fpe['fair_value_avg']:.2f}",
@@ -5848,22 +5763,24 @@ if mode == "Listed Company (Yahoo Finance)":
                     else:
                         st.info("💡 Complete more valuation methods to see comprehensive comparison chart")
                 
-                # Main tabs - organized into logical groups
-                tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                    "📊 Analysis & Projections",
-                    "💰 DCF Valuation Details", 
-                    "🏢 Alternative Models",
-                    "📈 Peer & Market Comps",
-                    "📉 Sensitivity & Risk"
+                # Tabs for detailed output
+                tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+                    "📊 Historical & Projections",
+                    "💰 DCF Details",
+                    "🏆 Summary & Alt Models",
+                    "📈 Peer Comparison",
+                    "📉 Sensitivity",
+                    "📁 All Models"
                 ])
                 
                 with tab1:
-                    # Sub-sections for Historical and Projections
-                    st.markdown("### 📊 Historical Analysis")
+                    st.subheader("📊 Comprehensive Historical Financial Analysis")
+                    
+                    # Use advanced charting function
                     st.plotly_chart(create_historical_financials_chart(financials), use_container_width=True)
                     
                     # Data tables below charts
-                    with st.expander("📋 View Raw Data Tables", expanded=False):
+                    with st.expander("📋 View Raw Data Tables"):
                         st.subheader("Historical Financials (Last 3 Years)")
                         
                         hist_df = pd.DataFrame({
@@ -5909,15 +5826,15 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.dataframe(wc_df.style.format(format_dict), use_container_width=True)
                         
                         st.info(f"**Average Working Capital Days:** Inventory: {wc_metrics['avg_inv_days']:.1f} | Debtors: {wc_metrics['avg_deb_days']:.1f} | Creditors: {wc_metrics['avg_cred_days']:.1f}")
-                    
-                    st.markdown("---")
-                    st.markdown(f"### 📈 Projected Financials ({projection_years_listed} Years)")
+                
+                with tab1:  # Projections merged
+                    st.subheader(f"📈 Projected Financials ({projection_years_listed} Years)")
                     
                     # Use advanced charting function
                     st.plotly_chart(create_fcff_projection_chart(projections), use_container_width=True)
                     
                     # Data table below
-                    with st.expander("📋 View Projection Data Table", expanded=False):
+                    with st.expander("📋 View Projection Data Table"):
                         proj_df = pd.DataFrame({
                             'Year': [str(y) for y in projections['year']],
                             'Revenue': projections['revenue'],
@@ -5935,7 +5852,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     st.info(f"**Key Drivers:** Revenue Growth: {drivers['avg_growth']:.2f}% | Opex Margin: {drivers['avg_opex_margin']:.2f}% | CapEx/Revenue: {drivers['avg_capex_ratio']:.2f}% | Depreciation Rate: {drivers['avg_dep_rate']:.2f}%")
                 
-                with tab2:
+                with tab2:  # FCF
                     st.subheader("Free Cash Flow Working")
                     
                     fcff_df = pd.DataFrame({
@@ -5954,7 +5871,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     st.metric("Sum of PV(FCFF)", f"₹ {valuation['sum_pv_fcff']:.2f} Lacs")
                 
-                with tab2 (continued):
+                with tab2:  # WACC
                     st.subheader("🎯 WACC Calculation & Breakdown")
                     
                     # Advanced WACC breakdown chart
@@ -5995,7 +5912,7 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.write(f"WACC = ({wacc_details['we']:.2f}% × {wacc_details['ke']:.2f}%) + ({wacc_details['wd']:.2f}% × {wacc_details['kd_after_tax']:.2f}%)")
                         st.write(f"**WACC = {wacc_details['wacc']:.2f}%**")
                 
-                with tab5:
+                with tab3:  # Summary
                     st.subheader("🏆 DCF Valuation Summary")
                     
                     # Show FCFF adjustment notice if applicable
@@ -6108,7 +6025,7 @@ if mode == "Listed Company (Yahoo Finance)":
                             upside_avg = ((avg_all - current_price) / current_price * 100)
                             st.metric("Overall Upside/Downside", f"{upside_avg:+.1f}%")
                 
-                with tab3:
+                with tab5:  # Sensitivity
                     st.subheader("📉 Advanced Sensitivity Analysis")
                     
                     wacc_range = np.arange(max(1.0, wacc_details['wacc'] - 3), wacc_details['wacc'] + 3.5, 0.5)
@@ -6149,7 +6066,7 @@ if mode == "Listed Company (Yahoo Finance)":
                         
                         st.caption("Sensitivity table shows Fair Value per Share for different WACC and terminal growth rate combinations")
                 
-                with tab3:
+                with tab6:  # Comparative
                     st.subheader("🔍 Comparative (Relative) Valuation")
                     
                     if comp_tickers_listed:
@@ -6307,7 +6224,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     else:
                         st.info("Enter comparable tickers above to see relative valuation")
-                with tab4:
+                with tab4:  # Peer
                     st.subheader("🏢 Advanced Peer Comparison Dashboard")
                     
                     if comp_tickers_listed:
@@ -6316,7 +6233,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     else:
                         st.info("💡 Click 'Auto-Fetch Peers' button above or enter peer tickers manually to see detailed peer comparison with 3D visualizations")
                 
-                with tab3:
+                with tab3:  # DDM
                     st.subheader("💰 Dividend Discount Model (DDM)")
                     st.caption("Gordon Growth Model for dividend-paying companies")
                     
@@ -6431,7 +6348,7 @@ Fair Value = D₁ / (r - g)
                         st.write("✅ Company is in mature growth stage")
                         st.write("✅ Required return > dividend growth rate")
                 
-                with tab3:
+                with tab3:  # RIM
                     st.subheader("🏢 Residual Income Model (RIM)")
                     st.caption("Equity valuation based on book value and excess returns")
                     
@@ -7087,7 +7004,7 @@ else:  # Unlisted Mode
                         st.write(f"WACC = ({wacc_details['we']:.2f}% × {wacc_details['ke']:.2f}%) + ({wacc_details['wd']:.2f}% × {wacc_details['kd_after_tax']:.2f}%)")
                         st.write(f"**WACC = {wacc_details['wacc']:.2f}%**")
                 
-                with tab5:
+                with tab3:  # Summary
                     st.subheader("DCF Valuation Summary")
                     
                     # Show FCFF adjustment notice if applicable
@@ -7201,7 +7118,7 @@ else:  # Unlisted Mode
                     
                     st.caption("Sensitivity table shows Fair Value per Share for different WACC and terminal growth rate combinations")
                 
-                with tab3:
+                with tab5:  # Sensitivity
                     st.subheader("🔍 Comparative (Relative) Valuation")
                     
                     if peer_tickers and peer_tickers.strip():
@@ -7280,7 +7197,7 @@ else:  # Unlisted Mode
                     else:
                         st.info("💡 Enter peer tickers above (e.g., 'RELIANCE, TATASTEEL') to see comparative valuation based on peer multiples")
                 
-                with tab3:
+                with tab6:  # Comparative
                     st.subheader("🏢 Advanced Peer Comparison Dashboard")
                     
                     if peer_tickers and peer_tickers.strip():
