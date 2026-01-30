@@ -5848,28 +5848,22 @@ if mode == "Listed Company (Yahoo Finance)":
                     else:
                         st.info("💡 Complete more valuation methods to see comprehensive comparison chart")
                 
-                # Tabs for detailed output
-                tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
-                    "📊 Historical Analysis",
-                    "📈 Projections",
-                    "💰 FCF Working",
-                    "🎯 WACC Breakdown",
-                    "🏆 Valuation Summary",
-                    "📉 Sensitivity Analysis",
-                    "📁 Comparative Valuation",
-                    "🏢 Peer Comparison",
-                    "💰 Dividend Discount Model",
-                    "🏢 Residual Income Model"
+                # Main tabs - organized into logical groups
+                tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                    "📊 Analysis & Projections",
+                    "💰 DCF Valuation Details", 
+                    "🏢 Alternative Models",
+                    "📈 Peer & Market Comps",
+                    "📉 Sensitivity & Risk"
                 ])
                 
                 with tab1:
-                    st.subheader("📊 Comprehensive Historical Financial Analysis")
-                    
-                    # Use advanced charting function
+                    # Sub-sections for Historical and Projections
+                    st.markdown("### 📊 Historical Analysis")
                     st.plotly_chart(create_historical_financials_chart(financials), use_container_width=True)
                     
                     # Data tables below charts
-                    with st.expander("📋 View Raw Data Tables"):
+                    with st.expander("📋 View Raw Data Tables", expanded=False):
                         st.subheader("Historical Financials (Last 3 Years)")
                         
                         hist_df = pd.DataFrame({
@@ -5915,15 +5909,15 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.dataframe(wc_df.style.format(format_dict), use_container_width=True)
                         
                         st.info(f"**Average Working Capital Days:** Inventory: {wc_metrics['avg_inv_days']:.1f} | Debtors: {wc_metrics['avg_deb_days']:.1f} | Creditors: {wc_metrics['avg_cred_days']:.1f}")
-                
-                with tab2:
-                    st.subheader(f"📈 Projected Financials ({projection_years_listed} Years)")
+                    
+                    st.markdown("---")
+                    st.markdown(f"### 📈 Projected Financials ({projection_years_listed} Years)")
                     
                     # Use advanced charting function
                     st.plotly_chart(create_fcff_projection_chart(projections), use_container_width=True)
                     
                     # Data table below
-                    with st.expander("📋 View Projection Data Table"):
+                    with st.expander("📋 View Projection Data Table", expanded=False):
                         proj_df = pd.DataFrame({
                             'Year': [str(y) for y in projections['year']],
                             'Revenue': projections['revenue'],
@@ -5941,7 +5935,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     st.info(f"**Key Drivers:** Revenue Growth: {drivers['avg_growth']:.2f}% | Opex Margin: {drivers['avg_opex_margin']:.2f}% | CapEx/Revenue: {drivers['avg_capex_ratio']:.2f}% | Depreciation Rate: {drivers['avg_dep_rate']:.2f}%")
                 
-                with tab3:
+                with tab2:
                     st.subheader("Free Cash Flow Working")
                     
                     fcff_df = pd.DataFrame({
@@ -5960,7 +5954,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     st.metric("Sum of PV(FCFF)", f"₹ {valuation['sum_pv_fcff']:.2f} Lacs")
                 
-                with tab4:
+                with tab2 (continued):
                     st.subheader("🎯 WACC Calculation & Breakdown")
                     
                     # Advanced WACC breakdown chart
@@ -6114,7 +6108,7 @@ if mode == "Listed Company (Yahoo Finance)":
                             upside_avg = ((avg_all - current_price) / current_price * 100)
                             st.metric("Overall Upside/Downside", f"{upside_avg:+.1f}%")
                 
-                with tab6:
+                with tab3:
                     st.subheader("📉 Advanced Sensitivity Analysis")
                     
                     wacc_range = np.arange(max(1.0, wacc_details['wacc'] - 3), wacc_details['wacc'] + 3.5, 0.5)
@@ -6155,7 +6149,7 @@ if mode == "Listed Company (Yahoo Finance)":
                         
                         st.caption("Sensitivity table shows Fair Value per Share for different WACC and terminal growth rate combinations")
                 
-                with tab7:
+                with tab3:
                     st.subheader("🔍 Comparative (Relative) Valuation")
                     
                     if comp_tickers_listed:
@@ -6313,7 +6307,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     else:
                         st.info("Enter comparable tickers above to see relative valuation")
-                with tab8:
+                with tab4:
                     st.subheader("🏢 Advanced Peer Comparison Dashboard")
                     
                     if comp_tickers_listed:
@@ -6322,7 +6316,7 @@ if mode == "Listed Company (Yahoo Finance)":
                     else:
                         st.info("💡 Click 'Auto-Fetch Peers' button above or enter peer tickers manually to see detailed peer comparison with 3D visualizations")
                 
-                with tab9:
+                with tab3:
                     st.subheader("💰 Dividend Discount Model (DDM)")
                     st.caption("Gordon Growth Model for dividend-paying companies")
                     
@@ -6437,7 +6431,7 @@ Fair Value = D₁ / (r - g)
                         st.write("✅ Company is in mature growth stage")
                         st.write("✅ Required return > dividend growth rate")
                 
-                with tab10:
+                with tab3:
                     st.subheader("🏢 Residual Income Model (RIM)")
                     st.caption("Equity valuation based on book value and excess returns")
                     
@@ -7207,7 +7201,7 @@ else:  # Unlisted Mode
                     
                     st.caption("Sensitivity table shows Fair Value per Share for different WACC and terminal growth rate combinations")
                 
-                with tab6:
+                with tab3:
                     st.subheader("🔍 Comparative (Relative) Valuation")
                     
                     if peer_tickers and peer_tickers.strip():
@@ -7286,7 +7280,7 @@ else:  # Unlisted Mode
                     else:
                         st.info("💡 Enter peer tickers above (e.g., 'RELIANCE, TATASTEEL') to see comparative valuation based on peer multiples")
                 
-                with tab7:
+                with tab3:
                     st.subheader("🏢 Advanced Peer Comparison Dashboard")
                     
                     if peer_tickers and peer_tickers.strip():
