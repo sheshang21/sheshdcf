@@ -14,6 +14,58 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from peer_comparison_charts import create_peer_comparison_dashboard
 
+# ================================
+# GLOBAL CSS - PREVENT TEXT TRUNCATION
+# ================================
+st.markdown("""
+<style>
+    /* Prevent text truncation in ALL elements */
+    * {
+        text-overflow: clip !important;
+        white-space: normal !important;
+        overflow: visible !important;
+    }
+    
+    /* Specifically for metrics */
+    [data-testid="stMetric"] * {
+        text-overflow: clip !important;
+        white-space: normal !important;
+        overflow: visible !important;
+    }
+    
+    [data-testid="stMetricLabel"] {
+        text-overflow: clip !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        word-wrap: break-word !important;
+    }
+    
+    [data-testid="stMetricValue"] {
+        text-overflow: clip !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        word-wrap: break-word !important;
+    }
+    
+    [data-testid="stMetricDelta"] {
+        text-overflow: clip !important;
+        white-space: normal !important;
+        overflow: visible !important;
+    }
+    
+    /* For columns */
+    .stColumn {
+        overflow: visible !important;
+    }
+    
+    /* For all text elements */
+    p, span, div, label {
+        text-overflow: clip !important;
+        overflow: visible !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Indian Stock Market APIs (fallback for Yahoo Finance)
 try:
     from utils_indian_apis import get_indian_stock_data, get_nse_quote, get_screener_data
@@ -5561,7 +5613,8 @@ if mode == "Listed Company (Yahoo Finance)":
                 
                 st.markdown("### 📊 Key Valuation Metrics")
                 
-                col1, col2, col3, col4, col5, col6 = st.columns(6)
+                # Row 1: Price metrics
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("📊 Current Price", f"₹ {current_price:.2f}")
                 with col2:
@@ -5569,6 +5622,9 @@ if mode == "Listed Company (Yahoo Finance)":
                              delta=f"{((valuation['fair_value_per_share'] - current_price) / current_price * 100):.1f}%")
                 with col3:
                     st.metric("Current P/E", f"{current_pe:.2f}x" if current_pe > 0 else "N/A")
+                
+                # Row 2: Additional metrics
+                col4, col5, col6 = st.columns(3)
                 with col4:
                     st.metric("Current EPS", f"₹ {current_eps:.2f}" if current_eps > 0 else "N/A")
                 with col5:
@@ -5583,7 +5639,8 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     fpe = comp_results['forward_pe']
                     
-                    col_fpe1, col_fpe2, col_fpe3, col_fpe4, col_fpe5 = st.columns(5)
+                    # Row 1: EPS metrics
+                    col_fpe1, col_fpe2, col_fpe3 = st.columns(3)
                     
                     with col_fpe1:
                         st.metric("Current EPS", f"₹{fpe.get('current_eps', 0):.2f}")
@@ -5595,6 +5652,9 @@ if mode == "Listed Company (Yahoo Finance)":
                     
                     with col_fpe3:
                         st.metric("Peer Avg P/E", f"{comp_results['multiples_stats']['pe']['average']:.2f}x" if 'pe' in comp_results['multiples_stats'] else "N/A")
+                    
+                    # Row 2: Fair value metrics
+                    col_fpe4, col_fpe5 = st.columns(2)
                     
                     with col_fpe4:
                         st.metric("Forward Fair Value (Avg)", f"₹{fpe['fair_value_avg']:.2f}",
