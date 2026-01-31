@@ -335,6 +335,288 @@ def convert_nse_to_bse_code(nse_symbol):
     return mapping.get(nse_symbol.upper(), None)
 
 
+def fetch_screener_financials(symbol, num_years=5):
+    """
+    Scrape full financials from screener.in and return in the same structure
+    that the DCF engine expects (same as extract_financials_listed output).
+
+    All values are returned in ₹ Lacs (screener.in publishes in Crores,
+    so we multiply by 10 to convert).
+
+    Args:
+        symbol: NSE/BSE ticker symbol (e.g., 'TATACAP')
+        num_years: Number of historical years to fetch
+
+    Returns:
+        dict with keys:
+            'financials' : the financials dict (years, revenue, cogs, opex, …)
+            'shares'     : shares outstanding (derived from Net Profit / EPS)
+            'company_name': display name scraped from page title
+        or None on failure
+    """
+    try:
+        from bs4 import BeautifulSoup
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                          'Chrome/120.0.0.0 Safari/537.36'
+        }
+
+        # ── 1. FETCH PAGE (consolidated first, standalone fallback) ──
+        urls_to_try = [
+            f"https://www.screener.in/company/{symbol}/consolidated/",
+            f"https://www.screener.in/company/{symbol}/"
+        ]
+
+        soup = None
+        page_url = None
+        for url in urls_to_try:
+            time.sleep(random.uniform(1.5, 3.0))  # respectful delay
+            resp = requests.get(url, headers=headers, timeout=20)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, 'lxml')
+                page_url = url
+                break
+
+        if soup is None:
+            print(f"[Screener] Could not fetch page for {symbol}")
+            return None
+
+        # ── 2. EXTRACT COMPANY NAME ──
+        title_tag = soup.find('h1')
+        company_name = title_tag.get_text(strip=True) if title_tag else symbol
+
+        # ── 3. HELPER: Parse a named row from a screener table ──
+        def find_table_by_heading(soup, heading_keywords):
+            """Find the <table> that follows an <h2> or section heading matching keywords."""
+            for heading in soup.find_all(['h2', 'h3']):
+                text = heading.get_text(strip=True).lower()
+                if all(kw.lower() in text for kw in heading_keywords):
+                    # Walk siblings until we find a table
+                    sibling = heading.find_next_sibling()
+                    while sibling:
+                        if sibling.name == 'table':
+                            return sibling
+                        # Sometimes the table is nested one div deeper
+                        tbl = sibling.find('table') if sibling.name else None
+                        if tbl:
+                            return tbl
+                        sibling = sibling.find_next_sibling()
+            return None
+
+        def parse_row(table, keywords):
+            """
+            Find a row in a screener table whose first cell matches any of keywords
+            (case-insensitive). Returns list of float values for the data columns.
+            """
+            if table is None:
+                return []
+            for tr in table.find_all('tr'):
+                cells = tr.find_all(['td', 'th'])
+                if not cells:
+                    continue
+                label = cells[0].get_text(strip=True).lower()
+                # Strip trailing dashes/non-breaking spaces that screener adds
+                label = label.replace('\xa0', ' ').replace('–', '').replace('-', '').strip()
+                for kw in keywords:
+                    if kw.lower() in label:
+                        # Extract numeric values from remaining cells
+                        values = []
+                        for cell in cells[1:]:
+                            raw = cell.get_text(strip=True).replace(',', '').replace('\xa0', '')
+                            try:
+                                values.append(float(raw))
+                            except (ValueError, TypeError):
+                                values.append(0.0)
+                        return values
+            return []
+
+        # ── 4. LOCATE P&L AND BALANCE SHEET TABLES ──
+        # Screener uses section headings; try multiple strategies
+        all_tables = soup.find_all('table')
+
+        pl_table = find_table_by_heading(soup, ['profit', 'loss'])
+        if pl_table is None and len(all_tables) >= 1:
+            pl_table = all_tables[0]  # first table is usually P&L
+
+        bs_table = find_table_by_heading(soup, ['balance', 'sheet'])
+        if bs_table is None and len(all_tables) >= 2:
+            bs_table = all_tables[1]  # second table is usually BS
+
+        if pl_table is None or bs_table is None:
+            print(f"[Screener] Could not locate P&L / BS tables for {symbol}")
+            return None
+
+        # ── 5. PARSE P&L ROWS ──
+        raw_revenue      = parse_row(pl_table, ['revenue', 'sales'])
+        raw_interest     = parse_row(pl_table, ['interest'])
+        raw_expenses     = parse_row(pl_table, ['expenses'])
+        raw_depreciation = parse_row(pl_table, ['depreciation'])
+        raw_pbt          = parse_row(pl_table, ['profit before tax'])
+        raw_tax_pct      = parse_row(pl_table, ['tax %'])
+        raw_net_profit   = parse_row(pl_table, ['net profit'])
+        raw_eps          = parse_row(pl_table, ['eps in rs', 'eps'])
+
+        # ── 6. PARSE BALANCE SHEET ROWS ──
+        raw_equity_capital = parse_row(bs_table, ['equity capital'])
+        raw_reserves       = parse_row(bs_table, ['reserves'])
+        raw_borrowing      = parse_row(bs_table, ['borrowing'])
+        raw_payables       = parse_row(bs_table, ['trade payables'])
+        raw_receivables    = parse_row(bs_table, ['trade receivables'])
+        raw_gross_block    = parse_row(bs_table, ['gross block'])
+        raw_accum_dep      = parse_row(bs_table, ['accumulated depreciation'])
+        raw_cash           = parse_row(bs_table, ['cash equivalents', 'cash'])
+
+        # ── 7. NORMALISE TO num_years (pad with 0 if shorter) ──
+        def pad(lst, n):
+            """Take last n values; pad front with 0 if shorter."""
+            lst = [v for v in lst if v is not None]
+            if len(lst) < n:
+                lst = [0.0] * (n - len(lst)) + lst
+            return lst[-n:]  # screener is oldest→newest; keep last n
+
+        n = num_years
+        revenue      = pad(raw_revenue, n)
+        interest     = pad(raw_interest, n)
+        expenses     = pad(raw_expenses, n)  # this is OpEx (excl interest, excl dep)
+        depreciation = pad(raw_depreciation, n)
+        pbt          = pad(raw_pbt, n)
+        tax_pct      = pad(raw_tax_pct, n)   # stored as fraction e.g. 0.25
+        net_profit   = pad(raw_net_profit, n)
+        eps          = pad(raw_eps, n)
+
+        equity_capital = pad(raw_equity_capital, n)
+        reserves       = pad(raw_reserves, n)
+        borrowing      = pad(raw_borrowing, n)
+        payables       = pad(raw_payables, n)
+        receivables    = pad(raw_receivables, n)
+        gross_block    = pad(raw_gross_block, n)
+        accum_dep      = pad(raw_accum_dep, n)
+        cash_vals      = pad(raw_cash, n)
+
+        # ── 8. DERIVE SHARES FROM EPS ──
+        # EPS is in ₹ per share; Net Profit is in Crores
+        # shares = (Net Profit in Crores × 10_000_000) / EPS
+        shares = 0
+        for i in range(n - 1, -1, -1):  # newest first
+            if eps[i] != 0 and net_profit[i] != 0:
+                shares = int((net_profit[i] * 10_000_000) / eps[i])
+                break
+
+        # ── 9. BUILD FINANCIALS DICT (values in Lacs = Crores × 10) ──
+        # screener publishes in Crores; multiply by 10 → Lacs
+        CR_TO_LAC = 10.0
+
+        # Years: screener data is oldest→newest; DCF engine expects newest→oldest (index 0 = latest)
+        # We reverse so index 0 = most recent year
+        years_labels = [str(2025 - i) for i in range(n)]  # approximate year labels newest→oldest
+
+        financials_out = {
+            'years': years_labels,
+            'revenue':      [],
+            'cogs':         [],
+            'opex':         [],
+            'ebitda':       [],
+            'depreciation': [],
+            'ebit':         [],
+            'interest':     [],
+            'interest_income': [],
+            'tax':          [],
+            'nopat':        [],
+            'fixed_assets': [],
+            'inventory':    [],
+            'receivables':  [],
+            'payables':     [],
+            'cash':         [],
+            'equity':       [],
+            'st_debt':      [],
+            'lt_debt':      [],
+        }
+
+        for i in range(n - 1, -1, -1):  # reverse: newest first
+            rev = revenue[i] * CR_TO_LAC
+
+            # Screener "Expenses" = total opex (employee + manufacturing + other, excl interest & dep)
+            # We approximate COGS as 55% of revenue (industry default for NBFCs/diversified)
+            # and back out opex so that: Revenue - COGS - OpEx = EBITDA exactly
+            dep_val  = depreciation[i] * CR_TO_LAC
+            int_val  = interest[i] * CR_TO_LAC
+            pbt_val  = pbt[i] * CR_TO_LAC
+
+            # EBITDA = PBT + Interest + Depreciation  (screener identity)
+            ebitda_val = pbt_val + int_val + dep_val
+
+            # COGS approximation
+            cogs_val = rev * 0.55 if rev > 0 else 0.0
+            # OpEx = Revenue - COGS - EBITDA  (ensures consistency)
+            opex_val = rev - cogs_val - ebitda_val
+            if opex_val < 0:
+                # If negative, shift: reduce COGS so opex = expenses row
+                opex_val = expenses[i] * CR_TO_LAC
+                cogs_val = rev - opex_val - ebitda_val
+                if cogs_val < 0:
+                    cogs_val = 0.0
+                    opex_val = rev - ebitda_val
+
+            ebit_val = ebitda_val - dep_val
+
+            # Tax rate: screener gives fraction (e.g. 0.25); clamp 0–0.40
+            t_rate = tax_pct[i]
+            if t_rate > 1:
+                t_rate = t_rate / 100.0  # in case it came as percentage
+            t_rate = max(0.0, min(t_rate, 0.40))
+            tax_val = pbt_val * t_rate
+
+            nopat_val = ebit_val * (1 - t_rate)
+
+            # Balance sheet (Lacs)
+            eq_val      = (equity_capital[i] + reserves[i]) * CR_TO_LAC
+            fa_val      = (gross_block[i] - accum_dep[i]) * CR_TO_LAC
+            if fa_val < 0:
+                fa_val  = gross_block[i] * CR_TO_LAC  # fallback: use gross
+            pay_val     = payables[i] * CR_TO_LAC
+            rec_val     = receivables[i] * CR_TO_LAC
+            cash_val    = cash_vals[i] * CR_TO_LAC
+            # Borrowing split: approximate 30% short-term, 70% long-term
+            borrow_val  = borrowing[i] * CR_TO_LAC
+            st_debt_val = borrow_val * 0.30
+            lt_debt_val = borrow_val * 0.70
+
+            # Inventory: screener doesn't expose it directly for NBFCs; use 0
+            inv_val = 0.0
+
+            financials_out['revenue'].append(rev)
+            financials_out['cogs'].append(cogs_val)
+            financials_out['opex'].append(opex_val)
+            financials_out['ebitda'].append(ebitda_val)
+            financials_out['depreciation'].append(dep_val)
+            financials_out['ebit'].append(ebit_val)
+            financials_out['interest'].append(int_val)
+            financials_out['interest_income'].append(int_val)  # for NBFCs interest IS income
+            financials_out['tax'].append(tax_val)
+            financials_out['nopat'].append(nopat_val)
+            financials_out['fixed_assets'].append(fa_val)
+            financials_out['inventory'].append(inv_val)
+            financials_out['receivables'].append(rec_val)
+            financials_out['payables'].append(pay_val)
+            financials_out['cash'].append(cash_val)
+            financials_out['equity'].append(eq_val)
+            financials_out['st_debt'].append(st_debt_val)
+            financials_out['lt_debt'].append(lt_debt_val)
+
+        return {
+            'financials': financials_out,
+            'shares': shares,
+            'company_name': company_name
+        }
+
+    except Exception as e:
+        print(f"[Screener] Error fetching financials for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def test_indian_apis():
     """
     Test function to check if Indian APIs are working
