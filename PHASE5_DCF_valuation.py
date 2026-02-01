@@ -1462,11 +1462,20 @@ def calculate_pb_roe_valuation(financials, shares, cost_of_equity, assumed_roe=N
         else:
             roe = (avg_net_income / avg_equity * 100) if avg_equity > 0 else 15
         
-        # Fair P/B ratio
+        # Fair P/B ratio — guard against zero cost_of_equity
+        if cost_of_equity <= 0:
+            st.warning("⚠️ Cost of Equity is zero or negative — P/B ROE model cannot run.")
+            return None
         fair_pb = roe / cost_of_equity
         
         # Fair value per share
         value_per_share = book_value_per_share * fair_pb
+        
+        # Historical ROE — guard each year against zero equity
+        historical_roe = [
+            (net_incomes[i] / equities[i] * 100) if equities[i] != 0 else 0.0
+            for i in range(len(net_incomes))
+        ]
         
         return {
             'method': 'P/B with ROE Analysis',
@@ -1475,7 +1484,7 @@ def calculate_pb_roe_valuation(financials, shares, cost_of_equity, assumed_roe=N
             'cost_of_equity': cost_of_equity,
             'fair_pb_ratio': fair_pb,
             'value_per_share': value_per_share,
-            'historical_roe': [(net_incomes[i] / equities[i] * 100) for i in range(len(net_incomes))]
+            'historical_roe': historical_roe
         }
     except Exception as e:
         st.error(f"P/B ROE error: {str(e)}")
@@ -5090,16 +5099,17 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.metric("📊 Current Market Price", f"₹ {current_price:.2f}")
                     
                     # Collect all fair values (initialize list first!)
+                    # Use .get() — some models return error dicts with no value key
                     fair_values = []
-                    if ri_model:
+                    if ri_model and ri_model.get('value_per_share', 0) > 0:
                         fair_values.append(ri_model['value_per_share'])
-                    if ddm_model:
+                    if ddm_model and ddm_model.get('value_per_share', 0) > 0:
                         fair_values.append(ddm_model['value_per_share'])
-                    if pb_roe_model:
+                    if pb_roe_model and pb_roe_model.get('value_per_share', 0) > 0:
                         fair_values.append(pb_roe_model['value_per_share'])
-                    if rel_val:
+                    if rel_val and rel_val.get('avg_fair_value', 0) > 0:
                         fair_values.append(rel_val['avg_fair_value'])
-                    if bank_dcf_result:
+                    if bank_dcf_result and bank_dcf_result.get('fair_value_per_share', 0) > 0:
                         fair_values.append(bank_dcf_result['fair_value_per_share'])
                     
                     avg_fair_value = np.mean(fair_values) if fair_values else 0
@@ -5134,7 +5144,7 @@ if mode == "Listed Company (Yahoo Finance)":
                         
                         # Comparison chart
                         valuations_dict = {}
-                        if ri_model:
+                        if ri_model and ri_model.get('value_per_share', 0) > 0:
                             valuations_dict['Residual Income Model'] = ri_model
                         if ddm_model:
                             valuations_dict['Dividend Discount Model'] = ddm_model
@@ -5149,18 +5159,18 @@ if mode == "Listed Company (Yahoo Finance)":
                         
                         # Summary table
                         summary_data = []
-                        if ri_model:
+                        if ri_model and ri_model.get('value_per_share', 0) > 0:
                             summary_data.append(['Residual Income Model', f"₹{ri_model['value_per_share']:.2f}", 
-                                               f"{((ri_model['value_per_share'] - current_price) / current_price * 100):.1f}%"])
-                        if ddm_model:
+                                               f"{((ri_model['value_per_share'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
+                        if ddm_model and ddm_model.get('value_per_share', 0) > 0:
                             summary_data.append(['Dividend Discount Model', f"₹{ddm_model['value_per_share']:.2f}",
-                                               f"{((ddm_model['value_per_share'] - current_price) / current_price * 100):.1f}%"])
-                        if pb_roe_model:
+                                               f"{((ddm_model['value_per_share'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
+                        if pb_roe_model and pb_roe_model.get('value_per_share', 0) > 0:
                             summary_data.append(['P/B with ROE Analysis', f"₹{pb_roe_model['value_per_share']:.2f}",
-                                               f"{((pb_roe_model['value_per_share'] - current_price) / current_price * 100):.1f}%"])
-                        if rel_val:
+                                               f"{((pb_roe_model['value_per_share'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
+                        if rel_val and rel_val.get('avg_fair_value', 0) > 0:
                             summary_data.append(['Relative Valuation (Avg)', f"₹{rel_val['avg_fair_value']:.2f}",
-                                               f"{((rel_val['avg_fair_value'] - current_price) / current_price * 100):.1f}%"])
+                                               f"{((rel_val['avg_fair_value'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
                         
                         summary_df = pd.DataFrame(summary_data, columns=['Method', 'Fair Value', 'Upside/Downside'])
                         st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -5171,7 +5181,7 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.plotly_chart(create_historical_financials_chart(financials), use_container_width=True)
                     
                     with tab2:
-                        if ri_model:
+                        if ri_model and ri_model.get('value_per_share', 0) > 0:
                             st.subheader("Residual Income Model")
                             st.write(f"**Fair Value per Share:** ₹{ri_model['value_per_share']:.2f}")
                             
@@ -5636,20 +5646,32 @@ if mode == "Listed Company (Yahoo Finance)":
                 
                 st.markdown("### 📊 Key Valuation Metrics")
                 
-                col1, col2, col3, col4, col5, col6 = st.columns(6)
+                # Row 1 — Price & Valuation
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("📊 Current Price", f"₹ {current_price:.2f}")
+                    st.metric("Current Price", f"₹ {current_price:.2f}")
                 with col2:
-                    st.metric("🎯 Fair Value (DCF)", f"₹ {valuation['fair_value_per_share']:.2f}",
-                             delta=f"{((valuation['fair_value_per_share'] - current_price) / current_price * 100):.1f}%")
+                    upside_pct = ((valuation['fair_value_per_share'] - current_price) / current_price * 100) if current_price > 0 else 0
+                    st.metric("Fair Value (DCF)", f"₹ {valuation['fair_value_per_share']:.2f}",
+                             delta=f"{upside_pct:.1f}%")
                 with col3:
-                    st.metric("Current P/E", f"{current_pe:.2f}x" if current_pe > 0 else "N/A")
+                    st.metric("Upside / Downside", f"{upside_pct:+.1f}%")
+                
+                # Row 2 — Ratios & Rates
+                col4, col5, col6 = st.columns(3)
                 with col4:
-                    st.metric("Current EPS", f"₹ {current_eps:.2f}" if current_eps > 0 else "N/A")
+                    st.metric("P/E Ratio", f"{current_pe:.2f}x" if current_pe > 0 else "N/A")
                 with col5:
-                    st.metric("WACC", f"{wacc_details['wacc']:.2f}%")
+                    st.metric("EPS", f"₹ {current_eps:.2f}" if current_eps > 0 else "N/A")
                 with col6:
+                    st.metric("WACC", f"{wacc_details['wacc']:.2f}%")
+                
+                # Row 3 — Additional
+                col7, col8 = st.columns(2)
+                with col7:
                     st.metric("Terminal Growth", f"{terminal_growth:.1f}%")
+                with col8:
+                    st.metric("Beta", f"{wacc_details.get('beta', 0):.3f}")
                 
                 # Forward P/E Display (if available)
                 if 'comp_results' in locals() and comp_results and 'forward_pe' in comp_results:
@@ -7363,16 +7385,17 @@ elif mode == "Listed Company (Screener.in)":
                         st.metric("📊 Current Market Price", f"₹ {current_price:.2f}")
                     
                     # Collect all fair values (initialize list first!)
+                    # Use .get() — some models return error dicts with no value key
                     fair_values = []
-                    if ri_model:
+                    if ri_model and ri_model.get('value_per_share', 0) > 0:
                         fair_values.append(ri_model['value_per_share'])
-                    if ddm_model:
+                    if ddm_model and ddm_model.get('value_per_share', 0) > 0:
                         fair_values.append(ddm_model['value_per_share'])
-                    if pb_roe_model:
+                    if pb_roe_model and pb_roe_model.get('value_per_share', 0) > 0:
                         fair_values.append(pb_roe_model['value_per_share'])
-                    if rel_val:
+                    if rel_val and rel_val.get('avg_fair_value', 0) > 0:
                         fair_values.append(rel_val['avg_fair_value'])
-                    if bank_dcf_result:
+                    if bank_dcf_result and bank_dcf_result.get('fair_value_per_share', 0) > 0:
                         fair_values.append(bank_dcf_result['fair_value_per_share'])
                     
                     avg_fair_value = np.mean(fair_values) if fair_values else 0
@@ -7407,7 +7430,7 @@ elif mode == "Listed Company (Screener.in)":
                         
                         # Comparison chart
                         valuations_dict = {}
-                        if ri_model:
+                        if ri_model and ri_model.get('value_per_share', 0) > 0:
                             valuations_dict['Residual Income Model'] = ri_model
                         if ddm_model:
                             valuations_dict['Dividend Discount Model'] = ddm_model
@@ -7422,18 +7445,18 @@ elif mode == "Listed Company (Screener.in)":
                         
                         # Summary table
                         summary_data = []
-                        if ri_model:
+                        if ri_model and ri_model.get('value_per_share', 0) > 0:
                             summary_data.append(['Residual Income Model', f"₹{ri_model['value_per_share']:.2f}", 
-                                               f"{((ri_model['value_per_share'] - current_price) / current_price * 100):.1f}%"])
-                        if ddm_model:
+                                               f"{((ri_model['value_per_share'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
+                        if ddm_model and ddm_model.get('value_per_share', 0) > 0:
                             summary_data.append(['Dividend Discount Model', f"₹{ddm_model['value_per_share']:.2f}",
-                                               f"{((ddm_model['value_per_share'] - current_price) / current_price * 100):.1f}%"])
-                        if pb_roe_model:
+                                               f"{((ddm_model['value_per_share'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
+                        if pb_roe_model and pb_roe_model.get('value_per_share', 0) > 0:
                             summary_data.append(['P/B with ROE Analysis', f"₹{pb_roe_model['value_per_share']:.2f}",
-                                               f"{((pb_roe_model['value_per_share'] - current_price) / current_price * 100):.1f}%"])
-                        if rel_val:
+                                               f"{((pb_roe_model['value_per_share'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
+                        if rel_val and rel_val.get('avg_fair_value', 0) > 0:
                             summary_data.append(['Relative Valuation (Avg)', f"₹{rel_val['avg_fair_value']:.2f}",
-                                               f"{((rel_val['avg_fair_value'] - current_price) / current_price * 100):.1f}%"])
+                                               f"{((rel_val['avg_fair_value'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else "N/A"])
                         
                         summary_df = pd.DataFrame(summary_data, columns=['Method', 'Fair Value', 'Upside/Downside'])
                         st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -7444,7 +7467,7 @@ elif mode == "Listed Company (Screener.in)":
                         st.plotly_chart(create_historical_financials_chart(financials), use_container_width=True)
                     
                     with tab2:
-                        if ri_model:
+                        if ri_model and ri_model.get('value_per_share', 0) > 0:
                             st.subheader("Residual Income Model")
                             st.write(f"**Fair Value per Share:** ₹{ri_model['value_per_share']:.2f}")
                             
@@ -7909,20 +7932,32 @@ elif mode == "Listed Company (Screener.in)":
                 
                 st.markdown("### 📊 Key Valuation Metrics")
                 
-                col1, col2, col3, col4, col5, col6 = st.columns(6)
+                # Row 1 — Price & Valuation
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("📊 Current Price", f"₹ {current_price:.2f}")
+                    st.metric("Current Price", f"₹ {current_price:.2f}")
                 with col2:
-                    st.metric("🎯 Fair Value (DCF)", f"₹ {valuation['fair_value_per_share']:.2f}",
-                             delta=f"{((valuation['fair_value_per_share'] - current_price) / current_price * 100):.1f}%")
+                    upside_pct = ((valuation['fair_value_per_share'] - current_price) / current_price * 100) if current_price > 0 else 0
+                    st.metric("Fair Value (DCF)", f"₹ {valuation['fair_value_per_share']:.2f}",
+                             delta=f"{upside_pct:.1f}%")
                 with col3:
-                    st.metric("Current P/E", f"{current_pe:.2f}x" if current_pe > 0 else "N/A")
+                    st.metric("Upside / Downside", f"{upside_pct:+.1f}%")
+                
+                # Row 2 — Ratios & Rates
+                col4, col5, col6 = st.columns(3)
                 with col4:
-                    st.metric("Current EPS", f"₹ {current_eps:.2f}" if current_eps > 0 else "N/A")
+                    st.metric("P/E Ratio", f"{current_pe:.2f}x" if current_pe > 0 else "N/A")
                 with col5:
-                    st.metric("WACC", f"{wacc_details['wacc']:.2f}%")
+                    st.metric("EPS", f"₹ {current_eps:.2f}" if current_eps > 0 else "N/A")
                 with col6:
+                    st.metric("WACC", f"{wacc_details['wacc']:.2f}%")
+                
+                # Row 3 — Additional
+                col7, col8 = st.columns(2)
+                with col7:
                     st.metric("Terminal Growth", f"{terminal_growth:.1f}%")
+                with col8:
+                    st.metric("Beta", f"{wacc_details.get('beta', 0):.3f}")
                 
                 # Forward P/E Display (if available)
                 if 'comp_results' in locals() and comp_results and 'forward_pe' in comp_results:
