@@ -365,5 +365,270 @@ def test_indian_apis():
     print("Test complete!")
 
 
+def fetch_screener_financials(symbol, num_years=5):
+    """
+    Scrape full financials from screener.in and return in DCF-compatible format
+    
+    All values returned in ₹ Lacs (Screener publishes in Crores, so multiply by 10)
+    
+    Args:
+        symbol: NSE/BSE ticker symbol (e.g. 'TATACAP', 'VEDL')
+        num_years: Number of historical years to fetch (default: 5)
+    
+    Returns:
+        {
+            'financials': dict with keys matching extract_financials_listed output,
+            'shares': int - shares outstanding (derived from Net Profit / EPS),
+            'company_name': str - company name from page
+        }
+        or None on failure
+    """
+    import time as _time
+    import random as _random
+    
+    try:
+        from bs4 import BeautifulSoup
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        # Try consolidated first, then standalone
+        urls_to_try = [
+            f"https://www.screener.in/company/{symbol}/consolidated/",
+            f"https://www.screener.in/company/{symbol}/"
+        ]
+        
+        soup = None
+        for url in urls_to_try:
+            _time.sleep(_random.uniform(1.5, 3.0))  # Respectful delay
+            resp = requests.get(url, headers=headers, timeout=20)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, 'lxml')
+                break
+        
+        if soup is None:
+            print(f"[Screener] Could not fetch page for {symbol}")
+            return None
+        
+        # Get company name
+        title_tag = soup.find('h1')
+        company_name = title_tag.get_text(strip=True) if title_tag else symbol
+        
+        # Helper functions
+        def find_table_by_heading(soup, heading_keywords):
+            """Find table following h2/h3 matching keywords"""
+            for heading in soup.find_all(['h2', 'h3']):
+                text_lower = heading.get_text(strip=True).lower()
+                if all(kw.lower() in text_lower for kw in heading_keywords):
+                    sibling = heading.find_next_sibling()
+                    while sibling:
+                        if sibling.name == 'table':
+                            return sibling
+                        tbl = sibling.find('table') if sibling.name else None
+                        if tbl:
+                            return tbl
+                        sibling = sibling.find_next_sibling()
+            return None
+        
+        def parse_row(table, keywords):
+            """Find row matching keywords and extract values"""
+            if table is None:
+                return []
+            for tr in table.find_all('tr'):
+                cells = tr.find_all(['td', 'th'])
+                if not cells:
+                    continue
+                label = cells[0].get_text(strip=True).lower()
+                label = label.replace('\xa0', ' ').replace('–', '').replace('-', '').strip()
+                for kw in keywords:
+                    if kw.lower() in label:
+                        values = []
+                        for cell in cells[1:]:
+                            raw = cell.get_text(strip=True).replace(',', '').replace('\xa0', '')
+                            try:
+                                values.append(float(raw))
+                            except (ValueError, TypeError):
+                                values.append(0.0)
+                        return values
+            return []
+        
+        # Locate P&L and Balance Sheet tables
+        all_tables = soup.find_all('table')
+        
+        pl_table = find_table_by_heading(soup, ['profit', 'loss'])
+        if pl_table is None and len(all_tables) >= 1:
+            pl_table = all_tables[0]
+        
+        bs_table = find_table_by_heading(soup, ['balance', 'sheet'])
+        if bs_table is None and len(all_tables) >= 2:
+            bs_table = all_tables[1]
+        
+        if pl_table is None or bs_table is None:
+            print(f"[Screener] Could not locate P&L/BS tables for {symbol}")
+            return None
+        
+        # Parse rows from P&L
+        raw_revenue = parse_row(pl_table, ['revenue', 'sales'])
+        raw_interest = parse_row(pl_table, ['interest'])
+        raw_expenses = parse_row(pl_table, ['expenses'])
+        raw_depreciation = parse_row(pl_table, ['depreciation'])
+        raw_pbt = parse_row(pl_table, ['profit before tax'])
+        raw_tax_pct = parse_row(pl_table, ['tax %'])
+        raw_net_profit = parse_row(pl_table, ['net profit'])
+        raw_eps = parse_row(pl_table, ['eps in rs', 'eps'])
+        
+        # Parse rows from Balance Sheet
+        raw_equity_capital = parse_row(bs_table, ['equity capital'])
+        raw_reserves = parse_row(bs_table, ['reserves'])
+        raw_borrowing = parse_row(bs_table, ['borrowing'])
+        raw_payables = parse_row(bs_table, ['trade payables'])
+        raw_receivables = parse_row(bs_table, ['trade receivables'])
+        raw_gross_block = parse_row(bs_table, ['gross block'])
+        raw_accum_dep = parse_row(bs_table, ['accumulated depreciation'])
+        raw_cash = parse_row(bs_table, ['cash equivalents', 'cash and bank'])
+        raw_inventory = parse_row(bs_table, ['inventories'])
+        
+        # Normalize length
+        def pad(lst, n):
+            """Keep last n values; pad front with 0.0 if shorter"""
+            lst = [v for v in lst if v is not None]
+            if len(lst) < n:
+                lst = [0.0] * (n - len(lst)) + lst
+            return lst[-n:]  # Screener: oldest → newest
+        
+        n = num_years
+        revenue = pad(raw_revenue, n)
+        interest = pad(raw_interest, n)
+        expenses = pad(raw_expenses, n)
+        depreciation = pad(raw_depreciation, n)
+        pbt = pad(raw_pbt, n)
+        tax_pct = pad(raw_tax_pct, n)
+        net_profit = pad(raw_net_profit, n)
+        eps = pad(raw_eps, n)
+        
+        equity_capital = pad(raw_equity_capital, n)
+        reserves = pad(raw_reserves, n)
+        borrowing = pad(raw_borrowing, n)
+        payables = pad(raw_payables, n)
+        receivables = pad(raw_receivables, n)
+        gross_block = pad(raw_gross_block, n)
+        accum_dep = pad(raw_accum_dep, n)
+        cash_vals = pad(raw_cash, n)
+        inventory_vals = pad(raw_inventory, n)
+        
+        # Derive shares from EPS
+        shares = 0
+        for i in range(n - 1, -1, -1):  # Newest first
+            if eps[i] != 0 and net_profit[i] != 0:
+                shares = int((net_profit[i] * 10_000_000) / eps[i])
+                break
+        
+        # Build financials dict (values in Lacs = Crores × 10)
+        CR_TO_LAC = 10.0
+        
+        # Year labels: newest → oldest (index 0 = most recent)
+        from datetime import datetime as _dt
+        current_year = _dt.now().year
+        years_labels = [str(current_year - i) for i in range(n)]
+        
+        financials_out = {
+            'years': years_labels,
+            'revenue': [],
+            'cogs': [],
+            'opex': [],
+            'ebitda': [],
+            'depreciation': [],
+            'ebit': [],
+            'interest': [],
+            'interest_income': [],
+            'tax': [],
+            'nopat': [],
+            'fixed_assets': [],
+            'inventory': [],
+            'receivables': [],
+            'payables': [],
+            'cash': [],
+            'equity': [],
+            'st_debt': [],
+            'lt_debt': [],
+        }
+        
+        # Iterate newest → oldest (reverse scraped arrays)
+        for i in range(n - 1, -1, -1):
+            rev = revenue[i] * CR_TO_LAC
+            dep_val = depreciation[i] * CR_TO_LAC
+            int_val = interest[i] * CR_TO_LAC
+            pbt_val = pbt[i] * CR_TO_LAC
+            
+            # EBITDA = PBT + Interest + Depreciation
+            ebitda_val = pbt_val + int_val + dep_val
+            
+            # COGS approximation: 55% of revenue (default)
+            cogs_val = rev * 0.55 if rev > 0 else 0.0
+            # OpEx derived: Revenue − COGS − OpEx = EBITDA
+            opex_val = rev - cogs_val - ebitda_val
+            if opex_val < 0:
+                opex_val = expenses[i] * CR_TO_LAC
+                cogs_val = rev - opex_val - ebitda_val
+                if cogs_val < 0:
+                    cogs_val = 0.0
+                    opex_val = rev - ebitda_val
+            
+            ebit_val = ebitda_val - dep_val
+            
+            # Tax rate
+            t_rate = tax_pct[i]
+            if t_rate > 1:
+                t_rate = t_rate / 100.0
+            t_rate = max(0.0, min(t_rate, 0.40))
+            tax_val = pbt_val * t_rate
+            nopat_val = ebit_val * (1 - t_rate)
+            
+            # Balance sheet
+            eq_val = (equity_capital[i] + reserves[i]) * CR_TO_LAC
+            fa_val = (gross_block[i] - accum_dep[i]) * CR_TO_LAC
+            if fa_val < 0:
+                fa_val = gross_block[i] * CR_TO_LAC
+            pay_val = payables[i] * CR_TO_LAC
+            rec_val = receivables[i] * CR_TO_LAC
+            cash_val = cash_vals[i] * CR_TO_LAC
+            inv_val = inventory_vals[i] * CR_TO_LAC
+            borrow_val = borrowing[i] * CR_TO_LAC
+            st_debt_val = borrow_val * 0.30
+            lt_debt_val = borrow_val * 0.70
+            
+            financials_out['revenue'].append(rev)
+            financials_out['cogs'].append(cogs_val)
+            financials_out['opex'].append(opex_val)
+            financials_out['ebitda'].append(ebitda_val)
+            financials_out['depreciation'].append(dep_val)
+            financials_out['ebit'].append(ebit_val)
+            financials_out['interest'].append(int_val)
+            financials_out['interest_income'].append(int_val)
+            financials_out['tax'].append(tax_val)
+            financials_out['nopat'].append(nopat_val)
+            financials_out['fixed_assets'].append(fa_val)
+            financials_out['inventory'].append(inv_val)
+            financials_out['receivables'].append(rec_val)
+            financials_out['payables'].append(pay_val)
+            financials_out['cash'].append(cash_val)
+            financials_out['equity'].append(eq_val)
+            financials_out['st_debt'].append(st_debt_val)
+            financials_out['lt_debt'].append(lt_debt_val)
+        
+        return {
+            'financials': financials_out,
+            'shares': shares,
+            'company_name': company_name
+        }
+    
+    except Exception as e:
+        print(f"[Screener] Error fetching financials for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 if __name__ == "__main__":
     test_indian_apis()

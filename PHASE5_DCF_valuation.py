@@ -1954,12 +1954,34 @@ def fetch_yahoo_financials_internal(ticker, exchange_suffix="NS"):
         return None, f"Error fetching data: {str(e)}"
 
 def extract_financials_listed(yahoo_data, num_years=3):
-    """Extract financial metrics from Yahoo Finance data
+    """
+    Extract financial metrics from Yahoo Finance OR Screener.in data
     
     Args:
-        yahoo_data: Dictionary containing Yahoo Finance data
+        yahoo_data: Dictionary containing either Yahoo Finance data OR Screener.in data
         num_years: Number of historical years to extract (default 3)
+    
+    Returns:
+        Dictionary with financial metrics in ₹ Lacs
     """
+    
+    # CHECK IF THIS IS SCREENER.IN DATA
+    if '_screener_financials' in yahoo_data:
+        # SCREENER.IN DATA PATH
+        st.info("📊 Using Screener.in financial data")
+        financials = yahoo_data['_screener_financials']
+        
+        # Screener data is already in the correct format (₹ Lacs)
+        # Just ensure we only return the requested number of years
+        if num_years < len(financials['years']):
+            # Truncate to requested years (newest first)
+            for key in financials.keys():
+                if isinstance(financials[key], list):
+                    financials[key] = financials[key][:num_years]
+        
+        return financials
+    
+    # YAHOO FINANCE DATA PATH (ORIGINAL CODE)
     try:
         income_stmt = yahoo_data['income_statement']
         balance_sheet = yahoo_data['balance_sheet']
@@ -2769,13 +2791,81 @@ def extract_financials_unlisted(df_bs, df_pl, year_cols):
     
     return financials
 
-def perform_comparative_valuation(target_ticker, comp_tickers_str, target_financials=None, target_shares=None, exchange_suffix="NS", projections=None):
+def fetch_screener_peer_data(ticker_symbol):
+    """
+    Fetch peer company data from Screener.in for comparative valuation
+    
+    Args:
+        ticker_symbol: NSE/BSE ticker (without .NS/.BO suffix)
+    
+    Returns:
+        dict with peer financial data or None
+    """
+    try:
+        from utils_indian_apis import fetch_screener_financials
+        import time
+        import random
+        
+        # Clean ticker
+        ticker_clean = ticker_symbol.replace('.NS', '').replace('.BO', '')
+        
+        # Add delay for respectful scraping
+        time.sleep(random.uniform(1.5, 3.0))
+        
+        screener_data = fetch_screener_financials(ticker_clean, num_years=3)
+        
+        if not screener_data or not screener_data.get('financials'):
+            return None
+        
+        financials = screener_data['financials']
+        shares = screener_data.get('shares', 0)
+        
+        # Convert to format expected by perform_comparative_valuation
+        # Values are already in Lacs, need to convert to rupees for compatibility
+        revenue = ensure_valid_number(financials['revenue'][0] * 100000, 0)  # Most recent year
+        ebitda = ensure_valid_number(financials['ebitda'][0] * 100000, 0)
+        net_income = ensure_valid_number(financials['nopat'][0] * 100000, 0)
+        total_debt = ensure_valid_number((financials['st_debt'][0] + financials['lt_debt'][0]) * 100000, 0)
+        cash = ensure_valid_number(financials['cash'][0] * 100000, 0)
+        equity = ensure_valid_number(financials['equity'][0] * 100000, 0)
+        
+        eps = safe_divide(net_income, shares, default=0)
+        book_value = safe_divide(equity, shares, default=0)
+        
+        return {
+            'ticker': ticker_clean,
+            'name': screener_data.get('company_name', ticker_clean),
+            'price': 0,  # Screener doesn't provide live price
+            'shares': shares,
+            'market_cap': 0,  # Cannot calculate without price
+            'revenue': revenue,
+            'ebitda': ebitda,
+            'net_income': net_income,
+            'eps': eps,
+            'book_value': book_value,
+            'total_debt': total_debt,
+            'cash': cash,
+            'enterprise_value': 0,  # Cannot calculate without market cap
+            '_source': 'screener'
+        }
+    
+    except Exception as e:
+        print(f"Error fetching Screener data for {ticker_symbol}: {e}")
+        return None
+
+
+def perform_comparative_valuation(target_ticker, comp_tickers_str, target_financials=None, target_shares=None, exchange_suffix="NS", projections=None, use_screener_peers=False):
     """
     Perform comparative valuation using peer multiples
     
     Args:
-        projections: DCF projections dict with 'nopat' key containing Year 1-5 projected NOPAT
-                    If provided, uses Year 1 projected NOPAT for Forward P/E (NO DUPLICATION!)
+        target_ticker: Target company ticker
+        comp_tickers_str: Comma-separated peer tickers
+        target_financials: Target company financials dict
+        target_shares: Target company shares outstanding
+        exchange_suffix: NS or BO
+        projections: DCF projections dict with 'nopat' key
+        use_screener_peers: If True, fetch peer data from Screener.in instead of Yahoo Finance
     """
     try:
         comp_tickers = [t.strip() for t in comp_tickers_str.split(',') if t.strip()]
@@ -2787,7 +2877,8 @@ def perform_comparative_valuation(target_ticker, comp_tickers_str, target_financ
             'target': {},
             'comparables': [],
             'multiples_stats': {},
-            'valuations': {}
+            'valuations': {},
+            '_peer_source': 'screener' if use_screener_peers else 'yahoo'
         }
         
         # Get target company data
@@ -2805,12 +2896,12 @@ def perform_comparative_valuation(target_ticker, comp_tickers_str, target_financ
                 'shares': target_info.get('sharesOutstanding', 0),
                 'market_cap': target_info.get('marketCap', 0),
                 'enterprise_value': target_info.get('enterpriseValue', 0),
-                'revenue': abs(target_financials_yf.loc['Total Revenue', target_financials_yf.columns[0]]) if 'Total Revenue' in target_financials_yf.index else 0,
+                'revenue': safe_extract(target_financials_yf, 'Total Revenue', target_financials_yf.columns[0]) if 'Total Revenue' in target_financials_yf.index else 0,
                 'ebitda': target_info.get('ebitda', 0),
-                'net_income': abs(target_financials_yf.loc['Net Income', target_financials_yf.columns[0]]) if 'Net Income' in target_financials_yf.index else 0,
+                'net_income': safe_extract(target_financials_yf, 'Net Income', target_financials_yf.columns[0]) if 'Net Income' in target_financials_yf.index else 0,
                 'book_value_per_share': target_info.get('bookValue', 0),
-                'total_debt': target_bs.loc['Long Term Debt', target_bs.columns[0]] if 'Long Term Debt' in target_bs.index else 0,
-                'cash': target_bs.loc['Cash And Cash Equivalents', target_bs.columns[0]] if 'Cash And Cash Equivalents' in target_bs.index else 0,
+                'total_debt': safe_extract(target_bs, 'Long Term Debt', target_bs.columns[0]) if 'Long Term Debt' in target_bs.index else 0,
+                'cash': safe_extract(target_bs, 'Cash And Cash Equivalents', target_bs.columns[0]) if 'Cash And Cash Equivalents' in target_bs.index else 0,
             }
             
             # Calculate EPS and Book Value - ALWAYS set to avoid KeyError
@@ -2838,42 +2929,95 @@ def perform_comparative_valuation(target_ticker, comp_tickers_str, target_financ
         
         # Get comparable companies data
         comp_data = []
-        for idx, ticker in enumerate(comp_tickers):
-            try:
-                # Add delay between requests to avoid rate limiting
-                if idx > 0:
-                    time.sleep(random.uniform(1.0, 1.5))  # Reduced from 2-3s since caching prevents duplicates
+        
+        if use_screener_peers:
+            # FETCH PEER DATA FROM SCREENER.IN
+            st.info(f"🌐 Fetching peer data from Screener.in for {len(comp_tickers)} companies...")
+            
+            for idx, ticker in enumerate(comp_tickers):
+                try:
+                    peer_data = fetch_screener_peer_data(ticker)
+                    
+                    if peer_data:
+                        # Calculate multiples (most will be 0 since no price/market cap)
+                        pe = 0  # Cannot calculate without price
+                        pb = 0  # Cannot calculate without price
+                        ps = 0  # Cannot calculate without market cap
+                        
+                        # Can calculate EV-based multiples if we have enterprise value
+                        enterprise_value = peer_data['enterprise_value']
+                        ev_ebitda = safe_divide(enterprise_value, peer_data['ebitda'], default=0)
+                        ev_sales = safe_divide(enterprise_value, peer_data['revenue'], default=0)
+                        
+                        comp_data.append({
+                            'ticker': peer_data['ticker'],
+                            'name': peer_data['name'],
+                            'price': peer_data['price'],
+                            'market_cap': peer_data['market_cap'],
+                            'revenue': peer_data['revenue'],
+                            'ebitda': peer_data['ebitda'],
+                            'net_income': peer_data['net_income'],
+                            'eps': peer_data['eps'],
+                            'book_value': peer_data['book_value'],
+                            'pe': pe,
+                            'pb': pb,
+                            'ps': ps,
+                            'ev_ebitda': ev_ebitda,
+                            'ev_sales': ev_sales,
+                            'enterprise_value': enterprise_value,
+                            'shares': peer_data['shares']
+                        })
+                        
+                        st.success(f"✅ {peer_data['name']}")
+                    else:
+                        st.warning(f"⚠️ Could not fetch data for {ticker}")
                 
-                # Ticker already has suffix (.NS or .BO) from UI combination
-                comp_stock = get_cached_ticker(ticker)
-                comp_info = comp_stock.info
-                comp_financials_yf = comp_stock.financials
-                comp_bs = comp_stock.balance_sheet
-                
-                # Extract financial data
-                shares = comp_info.get('sharesOutstanding', 0)
-                # Robust price fetching - try multiple methods
-                price = comp_info.get('currentPrice', 0)
-                if not price or price == 0:
-                    price = comp_info.get('regularMarketPrice', 0)
-                if not price or price == 0:
-                    try:
-                        hist = comp_stock.history(period='1d')
-                        if not hist.empty:
-                            price = hist['Close'].iloc[-1]
-                    except:
-                        pass
-                market_cap = comp_info.get('marketCap', 0)
-                
-                revenue = abs(comp_financials_yf.loc['Total Revenue', comp_financials_yf.columns[0]]) if 'Total Revenue' in comp_financials_yf.index and not comp_financials_yf.empty else 0
-                ebitda = comp_info.get('ebitda', 0)
-                net_income = abs(comp_financials_yf.loc['Net Income', comp_financials_yf.columns[0]]) if 'Net Income' in comp_financials_yf.index and not comp_financials_yf.empty else 0
-                
-                total_debt = abs(comp_bs.loc['Long Term Debt', comp_bs.columns[0]]) if 'Long Term Debt' in comp_bs.index and not comp_bs.empty else 0
-                cash = abs(comp_bs.loc['Cash And Cash Equivalents', comp_bs.columns[0]]) if 'Cash And Cash Equivalents' in comp_bs.index and not comp_bs.empty else 0
-                
-                book_value = comp_info.get('bookValue', 0)
-                eps = net_income / shares if shares > 0 else 0
+                except Exception as e:
+                    st.warning(f"⚠️ Error fetching {ticker}: {str(e)}")
+                    continue
+            
+            if not comp_data:
+                st.warning("⚠️ Could not fetch any peer data from Screener.in. Try Yahoo Finance instead.")
+                return None
+        
+        else:
+            # FETCH PEER DATA FROM YAHOO FINANCE (ORIGINAL CODE)
+            for idx, ticker in enumerate(comp_tickers):
+                try:
+                    # Add delay between requests to avoid rate limiting
+                    if idx > 0:
+                        time.sleep(random.uniform(1.0, 1.5))
+                    
+                    # Ticker already has suffix (.NS or .BO) from UI combination
+                    comp_stock = get_cached_ticker(ticker)
+                    comp_info = comp_stock.info
+                    comp_financials_yf = comp_stock.financials
+                    comp_bs = comp_stock.balance_sheet
+                    
+                    # Extract financial data
+                    shares = comp_info.get('sharesOutstanding', 0)
+                    # Robust price fetching - try multiple methods
+                    price = comp_info.get('currentPrice', 0)
+                    if not price or price == 0:
+                        price = comp_info.get('regularMarketPrice', 0)
+                    if not price or price == 0:
+                        try:
+                            hist = comp_stock.history(period='1d')
+                            if not hist.empty:
+                                price = hist['Close'].iloc[-1]
+                        except:
+                            pass
+                    market_cap = comp_info.get('marketCap', 0)
+                    
+                    revenue = safe_extract(comp_financials_yf, 'Total Revenue', comp_financials_yf.columns[0]) if 'Total Revenue' in comp_financials_yf.index and not comp_financials_yf.empty else 0
+                    ebitda = comp_info.get('ebitda', 0)
+                    net_income = safe_extract(comp_financials_yf, 'Net Income', comp_financials_yf.columns[0]) if 'Net Income' in comp_financials_yf.index and not comp_financials_yf.empty else 0
+                    
+                    total_debt = safe_extract(comp_bs, 'Long Term Debt', comp_bs.columns[0]) if 'Long Term Debt' in comp_bs.index and not comp_bs.empty else 0
+                    cash = safe_extract(comp_bs, 'Cash And Cash Equivalents', comp_bs.columns[0]) if 'Cash And Cash Equivalents' in comp_bs.index and not comp_bs.empty else 0
+                    
+                    book_value = comp_info.get('bookValue', 0)
+                    eps = net_income / shares if shares > 0 else 0
                 
                 # Calculate multiples
                 pe = price / eps if eps > 0 else 0
@@ -4991,8 +5135,36 @@ if mode == "Listed Company (Yahoo Finance)":
             **Recommendations:**
             - Wait a few minutes between requests
             - Use cached results when possible
-            - Consider using Excel upload for multiple analyses
+            - Consider using Screener.in as alternative data source (checkbox below)
             """)
+        
+        # DATA SOURCE SELECTION CHECKBOXES
+        st.markdown("---")
+        st.markdown("### 📊 Data Source Options")
+        
+        col_src1, col_src2 = st.columns(2)
+        
+        with col_src1:
+            use_screener_data = st.checkbox(
+                "🌐 Use Screener.in for company data",
+                value=False,
+                key='use_screener_data',
+                help="Fetch financial data from Screener.in instead of Yahoo Finance. Useful when Yahoo Finance is rate-limited or data is missing."
+            )
+            if use_screener_data:
+                st.info("📌 Company financials will be fetched from Screener.in (Indian stock screener)")
+        
+        with col_src2:
+            use_screener_peers = st.checkbox(
+                "🔗 Use Screener.in for peer data",
+                value=False,
+                key='use_screener_peers',
+                help="Fetch peer company data from Screener.in for comparative valuation. Works independently of main data source."
+            )
+            if use_screener_peers:
+                st.info("📌 Peer comparison data will be fetched from Screener.in")
+        
+        st.markdown("---")
         
         col_fetch1, col_fetch2 = st.columns([3, 1])
         
@@ -5007,17 +5179,70 @@ if mode == "Listed Company (Yahoo Finance)":
                 st.rerun()
         
         if st.session_state.get('show_results_listed', False):
-            with st.spinner("Fetching data from Yahoo Finance..."):
-                # Fetch data
-                yahoo_data, error = fetch_yahoo_financials(ticker, exchange_suffix)
-                
-                if error:
-                    st.error(error)
-                    st.stop()
-                
-                shares = yahoo_data['shares']
-                shares_source = yahoo_data.get('shares_source', 'Unknown')
-                company_name = yahoo_data['info'].get('longName', ticker)
+            # Determine data source based on checkbox
+            use_screener = st.session_state.get('use_screener_data', False)
+            
+            if use_screener:
+                # SCREENER.IN DATA SOURCE
+                with st.spinner("🌐 Fetching data from Screener.in..."):
+                    try:
+                        from utils_indian_apis import fetch_screener_financials
+                        
+                        # Remove exchange suffix for Screener.in
+                        ticker_clean = ticker.replace('.NS', '').replace('.BO', '')
+                        
+                        screener_data = fetch_screener_financials(ticker_clean, num_years=5)
+                        
+                        if screener_data and screener_data.get('financials'):
+                            st.success(f"✅ Data fetched from Screener.in for {screener_data.get('company_name', ticker_clean)}")
+                            
+                            # Convert to Yahoo Finance compatible format
+                            yahoo_data = {
+                                'info': {
+                                    'longName': screener_data.get('company_name', ticker_clean),
+                                    'currentPrice': 0,  # Screener doesn't provide live price
+                                    'sharesOutstanding': screener_data.get('shares', 0)
+                                },
+                                'income_statement': pd.DataFrame(),
+                                'balance_sheet': pd.DataFrame(),
+                                'cash_flow': pd.DataFrame(),
+                                'shares': screener_data.get('shares', 0),
+                                'shares_source': 'Screener.in (derived from EPS)',
+                                '_screener_financials': screener_data['financials'],  # Stash for extraction
+                                '_data_source': 'screener'
+                            }
+                            
+                            shares = screener_data.get('shares', 0)
+                            shares_source = 'Screener.in (EPS-based)'
+                            company_name = screener_data.get('company_name', ticker_clean)
+                            error = None
+                            
+                        else:
+                            st.error("❌ Could not fetch data from Screener.in. Please check ticker symbol or try Yahoo Finance.")
+                            st.stop()
+                    
+                    except ImportError:
+                        st.error("❌ Screener.in module not available. Please ensure utils_indian_apis.py is present.")
+                        st.stop()
+                    except Exception as e:
+                        st.error(f"❌ Error fetching from Screener.in: {str(e)}")
+                        st.info("💡 Try using Yahoo Finance instead (uncheck the Screener.in option)")
+                        st.stop()
+            
+            else:
+                # YAHOO FINANCE DATA SOURCE (DEFAULT)
+                with st.spinner("📊 Fetching data from Yahoo Finance..."):
+                    yahoo_data, error = fetch_yahoo_financials(ticker, exchange_suffix)
+                    
+                    if error:
+                        st.error(error)
+                        st.info("💡 **Suggestion:** Try checking the 'Use Screener.in' option above to fetch from an alternative data source")
+                        st.stop()
+                    
+                    shares = yahoo_data['shares']
+                    shares_source = yahoo_data.get('shares_source', 'Unknown')
+                    company_name = yahoo_data['info'].get('longName', ticker)
+                    yahoo_data['_data_source'] = 'yahoo'
                 
                 # Apply manual override if provided
                 if manual_shares_override > 0:
@@ -5779,7 +6004,18 @@ if mode == "Listed Company (Yahoo Finance)":
                 comp_results = None
                 if comp_tickers_listed and comp_tickers_listed.strip():
                     try:
-                        comp_results = perform_comparative_valuation(ticker, comp_tickers_listed, financials, shares, exchange_suffix, projections=projections)
+                        # Get use_screener_peers flag from session state
+                        use_screener_for_peers = st.session_state.get('use_screener_peers', False)
+                        
+                        comp_results = perform_comparative_valuation(
+                            ticker, 
+                            comp_tickers_listed, 
+                            financials, 
+                            shares, 
+                            exchange_suffix, 
+                            projections=projections,
+                            use_screener_peers=use_screener_for_peers
+                        )
                     except Exception as e:
                         st.warning(f"Could not calculate comparative valuation: {str(e)}")
                 
@@ -7350,7 +7586,16 @@ else:  # Unlisted Mode
                     
                     if peer_tickers and peer_tickers.strip():
                         with st.spinner("Fetching comparable companies data..."):
-                            comp_results = perform_comparative_valuation(None, peer_tickers, financials, num_shares, "NS")
+                            # Note: Unlisted companies don't have session state checkboxes
+                            # For now, use Yahoo Finance (default behavior)
+                            comp_results = perform_comparative_valuation(
+                                None, 
+                                peer_tickers, 
+                                financials, 
+                                num_shares, 
+                                "NS",
+                                use_screener_peers=False
+                            )
                         
                         if comp_results:
                             # Show comparables table
