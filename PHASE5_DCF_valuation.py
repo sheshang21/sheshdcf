@@ -3018,38 +3018,38 @@ def perform_comparative_valuation(target_ticker, comp_tickers_str, target_financ
                     
                     book_value = comp_info.get('bookValue', 0)
                     eps = net_income / shares if shares > 0 else 0
-                
-                # Calculate multiples
-                pe = price / eps if eps > 0 else 0
-                pb = price / book_value if book_value > 0 else 0
-                ps = market_cap / revenue if revenue > 0 else 0
-                
-                enterprise_value = market_cap + total_debt - cash
-                ev_ebitda = enterprise_value / ebitda if ebitda > 0 else 0
-                ev_sales = enterprise_value / revenue if revenue > 0 else 0
-                
-                comp_data.append({
-                    'ticker': ticker,
-                    'name': comp_info.get('longName', ticker),
-                    'price': price,
-                    'market_cap': market_cap,
-                    'revenue': revenue,
-                    'ebitda': ebitda,
-                    'net_income': net_income,
-                    'eps': eps,
-                    'book_value': book_value,
-                    'pe': pe,
-                    'pb': pb,
-                    'ps': ps,
-                    'ev_ebitda': ev_ebitda,
-                    'ev_sales': ev_sales,
-                    'enterprise_value': enterprise_value,
-                    'shares': shares
-                })
-                
-            except Exception as e:
-                st.warning(f"Could not fetch data for {ticker}: {str(e)}")
-                continue
+                    
+                    # Calculate multiples
+                    pe = price / eps if eps > 0 else 0
+                    pb = price / book_value if book_value > 0 else 0
+                    ps = market_cap / revenue if revenue > 0 else 0
+                    
+                    enterprise_value = market_cap + total_debt - cash
+                    ev_ebitda = enterprise_value / ebitda if ebitda > 0 else 0
+                    ev_sales = enterprise_value / revenue if revenue > 0 else 0
+                    
+                    comp_data.append({
+                        'ticker': ticker,
+                        'name': comp_info.get('longName', ticker),
+                        'price': price,
+                        'market_cap': market_cap,
+                        'revenue': revenue,
+                        'ebitda': ebitda,
+                        'net_income': net_income,
+                        'eps': eps,
+                        'book_value': book_value,
+                        'pe': pe,
+                        'pb': pb,
+                        'ps': ps,
+                        'ev_ebitda': ev_ebitda,
+                        'ev_sales': ev_sales,
+                        'enterprise_value': enterprise_value,
+                        'shares': shares
+                    })
+                    
+                except Exception as e:
+                    st.warning(f"Could not fetch data for {ticker}: {str(e)}")
+                    continue
         
         results['comparables'] = comp_data
         
