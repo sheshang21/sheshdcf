@@ -2016,6 +2016,31 @@ def extract_financials_listed(yahoo_data, num_years=3):
         st.info("📊 Using Screener.in financial data")
         financials = yahoo_data['_screener_financials']
         
+        # BUGFIX: Validate that all required fields exist and have data
+        required_fields = [
+            'years', 'revenue', 'cogs', 'opex', 'ebitda', 'depreciation',
+            'ebit', 'interest', 'tax', 'nopat', 'fixed_assets', 'inventory',
+            'receivables', 'payables', 'cash', 'equity', 'st_debt', 'lt_debt'
+        ]
+        
+        missing_fields = []
+        empty_fields = []
+        for field in required_fields:
+            if field not in financials:
+                missing_fields.append(field)
+            elif isinstance(financials[field], list) and len(financials[field]) == 0:
+                empty_fields.append(field)
+            elif isinstance(financials[field], list) and all(v == 0 for v in financials[field]):
+                empty_fields.append(field + " (all zeros)")
+        
+        if missing_fields:
+            st.error(f"❌ Missing financial fields from Screener.in: {', '.join(missing_fields)}")
+            st.info("💡 Try using Yahoo Finance data source instead")
+        
+        if empty_fields:
+            st.warning(f"⚠️ Empty or zero financial fields from Screener.in: {', '.join(empty_fields)}")
+            st.info("💡 This may be due to incomplete data on Screener.in for this stock")
+        
         # Screener data is already in the correct format (₹ Lacs)
         # Just ensure we only return the requested number of years
         if num_years < len(financials['years']):
@@ -4227,10 +4252,16 @@ def calculate_dcf_valuation(projections, wacc_details, terminal_growth, num_shar
         first_rev = projections['revenue'][0]
         last_rev = projections['revenue'][-1]
         num_years = len(projections['revenue']) - 1
-        implied_revenue_cagr = ((last_rev / first_rev) ** (1 / num_years) - 1) * 100
+        
+        # BUGFIX: Protect against zero/negative revenues to prevent ZeroDivisionError
+        if first_rev > 0 and last_rev > 0:
+            implied_revenue_cagr = ((last_rev / first_rev) ** (1 / num_years) - 1) * 100
+        else:
+            implied_revenue_cagr = 0  # Default to 0 if revenue data is invalid
+            st.warning("⚠️ Revenue data contains zero or negative values. Cannot calculate revenue CAGR.")
         
         # Warning if terminal growth is too close to revenue growth
-        if g > implied_revenue_cagr * 0.9:
+        if g > implied_revenue_cagr * 0.9 and implied_revenue_cagr > 0:
             st.warning(f"⚠️ Terminal Growth Rate ({g:.1f}%) is very close to projected revenue CAGR ({implied_revenue_cagr:.1f}%)")
             st.info("💡 **Recommendation:** Terminal growth should typically be 40-60% of revenue growth for conservative valuations")
     
@@ -5262,6 +5293,13 @@ if mode == "Listed Company (Yahoo Finance)":
                             company_name = screener_data.get('company_name', ticker_clean)
                             error = None
                             
+                            # BUGFIX: Validate shares from Screener and provide feedback
+                            if shares > 0:
+                                st.success(f"✅ Shares Outstanding fetched: **{shares:,}** from Screener.in (EPS-based)")
+                            else:
+                                st.warning("⚠️ Screener.in returned shares outstanding = 0. This may be due to missing or incomplete EPS data.")
+                                st.info("💡 **Troubleshooting:**\n- The stock may not have sufficient historical data on Screener.in\n- Try using manual override above\n- Or uncheck 'Use Screener.in' to fetch from Yahoo Finance")
+                            
                         else:
                             st.error("❌ Could not fetch data from Screener.in. Please check ticker symbol or try Yahoo Finance.")
                             st.stop()
@@ -5284,10 +5322,25 @@ if mode == "Listed Company (Yahoo Finance)":
                         st.info("💡 **Suggestion:** Try checking the 'Use Screener.in' option above to fetch from an alternative data source")
                         st.stop()
                     
-                    shares = yahoo_data['shares']
+                    shares = yahoo_data.get('shares', 0)
                     shares_source = yahoo_data.get('shares_source', 'Unknown')
                     company_name = yahoo_data['info'].get('longName', ticker)
                     yahoo_data['_data_source'] = 'yahoo'
+                    
+                    # BUGFIX: Add validation and fallback for shares
+                    if shares > 0:
+                        st.success(f"✅ Shares Outstanding fetched: **{shares:,}** from {shares_source}")
+                    else:
+                        st.warning(f"⚠️ Shares outstanding = 0. Source attempted: {shares_source}")
+                        # Try fallback calculation using Market Cap / Price
+                        info = yahoo_data.get('info', {})
+                        if 'marketCap' in info and 'currentPrice' in info:
+                            market_cap = info.get('marketCap', 0)
+                            current_price = info.get('currentPrice', 0)
+                            if market_cap > 0 and current_price > 0:
+                                shares = int(market_cap / current_price)
+                                shares_source = "Calculated (Market Cap ÷ Current Price)"
+                                st.info(f"🔄 Recalculated shares: **{shares:,}** using {shares_source}")
             
             # Common processing for both Screener.in and Yahoo Finance
             # Apply manual override if provided
