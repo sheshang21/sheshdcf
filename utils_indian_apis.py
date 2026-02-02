@@ -456,16 +456,21 @@ def fetch_screener_financials(symbol, num_years=5):
         # Locate P&L and Balance Sheet tables
         all_tables = soup.find_all('table')
         
+        print(f"[DEBUG] Found {len(all_tables)} tables total on Screener.in page")
+        
         pl_table = find_table_by_heading(soup, ['profit', 'loss'])
         if pl_table is None and len(all_tables) >= 1:
             pl_table = all_tables[0]
+            print(f"[DEBUG] Using first table as P&L (no heading found)")
         
         bs_table = find_table_by_heading(soup, ['balance', 'sheet'])
         if bs_table is None and len(all_tables) >= 2:
             bs_table = all_tables[1]
+            print(f"[DEBUG] Using second table as Balance Sheet (no heading found)")
         
         if pl_table is None or bs_table is None:
             print(f"[Screener] Could not locate P&L/BS tables for {symbol}")
+            print(f"[DEBUG] Found tables: {len(all_tables)}")
             return None
         
         # Parse rows from P&L
@@ -478,16 +483,86 @@ def fetch_screener_financials(symbol, num_years=5):
         raw_net_profit = parse_row(pl_table, ['net profit'])
         raw_eps = parse_row(pl_table, ['eps in rs', 'eps'])
         
-        # Parse rows from Balance Sheet
-        raw_equity_capital = parse_row(bs_table, ['equity capital', 'equity share capital'])
-        raw_reserves = parse_row(bs_table, ['reserves', 'reserves and surplus'])
-        raw_borrowing = parse_row(bs_table, ['borrowing', 'borrowings', 'total borrowings'])
-        raw_payables = parse_row(bs_table, ['trade payables', 'payables', 'accounts payable'])
-        raw_receivables = parse_row(bs_table, ['trade receivables', 'receivables', 'accounts receivable'])
-        raw_gross_block = parse_row(bs_table, ['gross block', 'fixed assets gross'])
-        raw_accum_dep = parse_row(bs_table, ['accumulated depreciation', 'depreciation'])
-        raw_cash = parse_row(bs_table, ['cash equivalents', 'cash and bank', 'cash'])
-        raw_inventory = parse_row(bs_table, ['inventories', 'inventory', 'stock'])
+        # Parse rows from Balance Sheet - FIXED to actually find the data
+        # The issue: Screener uses different exact labels, need to be more flexible
+        
+        def safe_parse(table, keywords_list):
+            """Try multiple keyword variations"""
+            for keywords in keywords_list:
+                result = parse_row(table, keywords)
+                if result:  # If we got non-empty result
+                    return result
+            return []
+        
+        # Try multiple variations for each field
+        raw_equity_capital = safe_parse(bs_table, [
+            ['equity capital'], 
+            ['equity share capital'],
+            ['share capital']
+        ])
+        
+        raw_reserves = safe_parse(bs_table, [
+            ['reserves'], 
+            ['reserves and surplus'],
+            ['other equity']
+        ])
+        
+        raw_borrowing = safe_parse(bs_table, [
+            ['borrowing'], 
+            ['borrowings'],
+            ['total borrowings'],
+            ['debt']
+        ])
+        
+        raw_payables = safe_parse(bs_table, [
+            ['trade payables'], 
+            ['payables'],
+            ['accounts payable'],
+            ['creditors']
+        ])
+        
+        raw_receivables = safe_parse(bs_table, [
+            ['trade receivables'], 
+            ['receivables'],
+            ['accounts receivable'],
+            ['debtors']
+        ])
+        
+        raw_gross_block = safe_parse(bs_table, [
+            ['gross block'],
+            ['fixed assets'],
+            ['property plant equipment'],
+            ['ppe']
+        ])
+        
+        raw_accum_dep = safe_parse(bs_table, [
+            ['accumulated depreciation'],
+            ['depreciation']
+        ])
+        
+        raw_cash = safe_parse(bs_table, [
+            ['cash equivalents'],
+            ['cash and bank'],
+            ['cash'],
+            ['bank balances']
+        ])
+        
+        raw_inventory = safe_parse(bs_table, [
+            ['inventories'],
+            ['inventory'],
+            ['stock']
+        ])
+        
+        # DEBUG: Log what we found
+        print(f"[DEBUG] Balance sheet parsing results:")
+        print(f"  Equity Capital: {len(raw_equity_capital)} values")
+        print(f"  Reserves: {len(raw_reserves)} values")
+        print(f"  Borrowing: {len(raw_borrowing)} values")
+        print(f"  Payables: {len(raw_payables)} values")
+        print(f"  Receivables: {len(raw_receivables)} values")
+        print(f"  Gross Block: {len(raw_gross_block)} values")
+        print(f"  Cash: {len(raw_cash)} values")
+        print(f"  Inventory: {len(raw_inventory)} values")
         
         # Normalize length
         def pad(lst, n):
