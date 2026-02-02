@@ -2040,6 +2040,19 @@ def extract_financials_listed(yahoo_data, num_years=3):
         if empty_fields:
             st.warning(f"⚠️ Empty or zero financial fields from Screener.in: {', '.join(empty_fields)}")
             st.info("💡 This may be due to incomplete data on Screener.in for this stock")
+            
+            # DEBUG: Show actual values for troubleshooting
+            with st.expander("🔍 Debug: View Raw Screener Data"):
+                debug_data = {
+                    'Fixed Assets': financials.get('fixed_assets', []),
+                    'Inventory': financials.get('inventory', []),
+                    'Receivables': financials.get('receivables', []),
+                    'Payables': financials.get('payables', []),
+                    'Equity': financials.get('equity', []),
+                    'ST Debt': financials.get('st_debt', []),
+                    'LT Debt': financials.get('lt_debt', [])
+                }
+                st.json(debug_data)
         
         # Screener data is already in the correct format (₹ Lacs)
         # Just ensure we only return the requested number of years

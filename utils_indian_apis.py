@@ -479,15 +479,15 @@ def fetch_screener_financials(symbol, num_years=5):
         raw_eps = parse_row(pl_table, ['eps in rs', 'eps'])
         
         # Parse rows from Balance Sheet
-        raw_equity_capital = parse_row(bs_table, ['equity capital'])
-        raw_reserves = parse_row(bs_table, ['reserves'])
-        raw_borrowing = parse_row(bs_table, ['borrowing'])
-        raw_payables = parse_row(bs_table, ['trade payables'])
-        raw_receivables = parse_row(bs_table, ['trade receivables'])
-        raw_gross_block = parse_row(bs_table, ['gross block'])
-        raw_accum_dep = parse_row(bs_table, ['accumulated depreciation'])
-        raw_cash = parse_row(bs_table, ['cash equivalents', 'cash and bank'])
-        raw_inventory = parse_row(bs_table, ['inventories'])
+        raw_equity_capital = parse_row(bs_table, ['equity capital', 'equity share capital'])
+        raw_reserves = parse_row(bs_table, ['reserves', 'reserves and surplus'])
+        raw_borrowing = parse_row(bs_table, ['borrowing', 'borrowings', 'total borrowings'])
+        raw_payables = parse_row(bs_table, ['trade payables', 'payables', 'accounts payable'])
+        raw_receivables = parse_row(bs_table, ['trade receivables', 'receivables', 'accounts receivable'])
+        raw_gross_block = parse_row(bs_table, ['gross block', 'fixed assets gross'])
+        raw_accum_dep = parse_row(bs_table, ['accumulated depreciation', 'depreciation'])
+        raw_cash = parse_row(bs_table, ['cash equivalents', 'cash and bank', 'cash'])
+        raw_inventory = parse_row(bs_table, ['inventories', 'inventory', 'stock'])
         
         # Normalize length
         def pad(lst, n):
