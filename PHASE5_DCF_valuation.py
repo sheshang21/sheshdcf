@@ -5288,40 +5288,41 @@ if mode == "Listed Company (Yahoo Finance)":
                     shares_source = yahoo_data.get('shares_source', 'Unknown')
                     company_name = yahoo_data['info'].get('longName', ticker)
                     yahoo_data['_data_source'] = 'yahoo'
-                
-                # Apply manual override if provided
-                if manual_shares_override > 0:
-                    shares = manual_shares_override
-                    shares_source = "Manual Override (User Input)"
-                    st.warning(f"⚠️ Using manual shares override: **{shares:,}** shares")
-                elif shares == 0:
-                    st.error("❌ **CRITICAL:** Could not fetch shares outstanding from Yahoo Finance!")
-                    st.warning("🔧 **Action Required:** Please enter shares outstanding manually using the override field above.")
-                    st.info("💡 **Where to find shares:**\n- Company's latest annual report\n- BSE/NSE company page\n- Screener.in or Moneycontrol")
-                    st.stop()
-                
-                st.success(f"✅ Loaded data for **{company_name}**")
-                
-                # Show shares with source
-                shares_in_crore = shares / 10000000
-                col_sh1, col_sh2 = st.columns(2)
-                with col_sh1:
-                    st.metric("📊 Shares Outstanding", f"{shares:,}", help=f"Source: {shares_source}")
-                with col_sh2:
-                    st.metric("📊 Shares (Crore)", f"{shares_in_crore:.2f} Cr")
-                
-                if shares_source != "Manual Override (User Input)" and shares_source != "Direct (sharesOutstanding)":
-                    st.caption(f"ℹ️ Shares source: {shares_source}")
-                
-                # Extract financials with user-selected historical years
-                financials = extract_financials_listed(yahoo_data, num_years=historical_years_listed)
-                
-                if financials is None:
-                    st.error("Failed to extract financial data")
-                    st.stop()
-                
-                # ================================
-                # BUSINESS MODEL CLASSIFICATION (RULEBOOK SECTION 2)
+            
+            # Common processing for both Screener.in and Yahoo Finance
+            # Apply manual override if provided
+            if manual_shares_override > 0:
+                shares = manual_shares_override
+                shares_source = "Manual Override (User Input)"
+                st.warning(f"⚠️ Using manual shares override: **{shares:,}** shares")
+            elif shares == 0:
+                st.error("❌ **CRITICAL:** Could not fetch shares outstanding!")
+                st.warning("🔧 **Action Required:** Please enter shares outstanding manually using the override field above.")
+                st.info("💡 **Where to find shares:**\n- Company's latest annual report\n- BSE/NSE company page\n- Screener.in or Moneycontrol")
+                st.stop()
+            
+            st.success(f"✅ Loaded data for **{company_name}**")
+            
+            # Show shares with source
+            shares_in_crore = shares / 10000000
+            col_sh1, col_sh2 = st.columns(2)
+            with col_sh1:
+                st.metric("📊 Shares Outstanding", f"{shares:,}", help=f"Source: {shares_source}")
+            with col_sh2:
+                st.metric("📊 Shares (Crore)", f"{shares_in_crore:.2f} Cr")
+            
+            if shares_source != "Manual Override (User Input)" and shares_source != "Direct (sharesOutstanding)":
+                st.caption(f"ℹ️ Shares source: {shares_source}")
+            
+            # Extract financials with user-selected historical years
+            financials = extract_financials_listed(yahoo_data, num_years=historical_years_listed)
+            
+            if financials is None:
+                st.error("Failed to extract financial data")
+                st.stop()
+            
+            # ================================
+            # BUSINESS MODEL CLASSIFICATION (RULEBOOK SECTION 2)
                 # ================================
                 st.markdown("---")
                 st.subheader("🏢 Business Model Classification")
