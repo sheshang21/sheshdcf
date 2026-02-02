@@ -5897,7 +5897,11 @@ if mode == "Listed Company (Yahoo Finance)":
                             """)
                     
                     st.stop()
-                
+            
+            # ================================
+            # STANDARD FCFF DCF FOR NON-BANK COMPANIES
+            # ================================
+            else:
                 st.markdown("---")
                 
                 # Calculate WC metrics
