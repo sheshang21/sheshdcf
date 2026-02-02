@@ -5984,10 +5984,12 @@ if mode == "Listed Company (Yahoo Finance)":
                     payout_ratio_override=ddm_payout_ratio_override if ddm_payout_ratio_override > 0 else None,
                     dcf_projections=projections  # ✅ PASS EXISTING PROJECTIONS - NO DUPLICATION!
                 )
-                if ddm_result:
+                if ddm_result and isinstance(ddm_result, dict) and 'value_per_share' in ddm_result:
                     st.success(f"✅ DDM Fair Value: ₹{ddm_result['value_per_share']:.2f}")
                     if ddm_result.get('using_dcf_projections'):
                         st.caption("💡 Using DCF projected NOPAT for dividend projections")
+                else:
+                    st.warning("⚠️ DDM not applicable (company may not pay dividends)")
                 
                 # Calculate Residual Income Model (RIM)
                 st.info("Calculating Residual Income Model...")
@@ -6003,10 +6005,14 @@ if mode == "Listed Company (Yahoo Finance)":
                     assumed_roe=rim_roe,
                     dcf_projections=projections  # ✅ PASS EXISTING PROJECTIONS - NO DUPLICATION!
                 )
-                if rim_result:
+                if rim_result and isinstance(rim_result, dict) and 'value_per_share' in rim_result:
                     st.success(f"✅ RIM Fair Value: ₹{rim_result['value_per_share']:.2f}")
                     if rim_result.get('using_dcf_projections'):
                         st.caption("💡 Using DCF projected NOPAT as Net Income")
+                else:
+                    st.warning("⚠️ RIM calculation returned incomplete results")
+                    if rim_result and isinstance(rim_result, dict):
+                        st.caption(f"RIM result keys: {list(rim_result.keys())}")
                 
                 # ================================
                 # DISPLAY RESULTS (SAME AS UNLISTED)
@@ -6755,14 +6761,14 @@ if mode == "Listed Company (Yahoo Finance)":
                         # Top metrics
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
-                            st.metric("Fair Value/Share", f"₹{ddm_result['value_per_share']:.2f}",
-                                    delta=f"{((ddm_result['value_per_share'] - current_price) / current_price * 100):.1f}%" if current_price > 0 else None)
+                            st.metric("Fair Value/Share", f"₹{ddm_result.get('value_per_share', 0):.2f}",
+                                    delta=f"{((ddm_result.get('value_per_share', 0) - current_price) / current_price * 100):.1f}%" if current_price > 0 else None)
                         with col2:
-                            st.metric("Current DPS", f"₹{ddm_result['current_dps']:.2f}")
+                            st.metric("Current DPS", f"₹{ddm_result.get('current_dps', 0):.2f}")
                         with col3:
-                            st.metric("Dividend Growth", f"{ddm_result['dividend_growth']:.1f}%")
+                            st.metric("Dividend Growth", f"{ddm_result.get('dividend_growth', 0):.1f}%")
                         with col4:
-                            st.metric("Payout Ratio", f"{ddm_result['payout_ratio']:.1f}%")
+                            st.metric("Payout Ratio", f"{ddm_result.get('payout_ratio', 0):.1f}%")
                         
                         st.markdown("---")
                         
@@ -6770,11 +6776,11 @@ if mode == "Listed Company (Yahoo Finance)":
                         
                         with col_a:
                             st.markdown("**📊 Model Parameters**")
-                            st.write(f"• **Current Dividend per Share:** ₹{ddm_result['current_dps']:.2f}")
-                            st.write(f"• **Next Year DPS (D1):** ₹{ddm_result['next_year_dps']:.2f}")
-                            st.write(f"• **Dividend Growth Rate:** {ddm_result['dividend_growth']:.2f}%")
-                            st.write(f"• **Required Return (Ke):** {ddm_result['required_return']:.2f}%")
-                            st.write(f"• **Payout Ratio:** {ddm_result['payout_ratio']:.1f}%")
+                            st.write(f"• **Current Dividend per Share:** ₹{ddm_result.get('current_dps', 0):.2f}")
+                            st.write(f"• **Next Year DPS (D1):** ₹{ddm_result.get('next_year_dps', 0):.2f}")
+                            st.write(f"• **Dividend Growth Rate:** {ddm_result.get('dividend_growth', 0):.2f}%")
+                            st.write(f"• **Required Return (Ke):** {ddm_result.get('required_return', 0):.2f}%")
+                            st.write(f"• **Payout Ratio:** {ddm_result.get('payout_ratio', 0):.1f}%")
                             
                             if ddm_result.get('using_actual_data'):
                                 st.success("✅ Using actual dividend history from market data")
@@ -6793,25 +6799,25 @@ if mode == "Listed Company (Yahoo Finance)":
                             
                             # Better formatted definitions with boxes
                             st.markdown(f"""
-                            - **P₀** (Fair Value per Share) = **₹{ddm_result['value_per_share']:.2f}**
-                            - **D₁** (Next Year Dividend) = ₹{ddm_result['next_year_dps']:.2f}
-                            - **r** (Required Return/Cost of Equity) = {ddm_result['required_return']:.2f}%
-                            - **g** (Dividend Growth Rate) = {ddm_result['dividend_growth']:.2f}%
+                            - **P₀** (Fair Value per Share) = **₹{ddm_result.get('value_per_share', 0):.2f}**
+                            - **D₁** (Next Year Dividend) = ₹{ddm_result.get('next_year_dps', 0):.2f}
+                            - **r** (Required Return/Cost of Equity) = {ddm_result.get('required_return', 0):.2f}%
+                            - **g** (Dividend Growth Rate) = {ddm_result.get('dividend_growth', 0):.2f}%
                             """)
                             
                             st.markdown("")  # Spacing
-                            calc_fv = ddm_result['next_year_dps'] / ((ddm_result['required_return'] - ddm_result['dividend_growth']) / 100)
+                            calc_fv = ddm_result.get('next_year_dps', 0) / ((ddm_result.get('required_return', 10) - ddm_result.get('dividend_growth', 5)) / 100) if (ddm_result.get('required_return', 10) - ddm_result.get('dividend_growth', 5)) > 0 else 0
                             
                             st.markdown("**💡 Calculation:**")
                             st.code(f"""
 Fair Value = D₁ / (r - g)
-           = ₹{ddm_result['next_year_dps']:.2f} / ({ddm_result['required_return']:.2f}% - {ddm_result['dividend_growth']:.2f}%)
-           = ₹{ddm_result['next_year_dps']:.2f} / {(ddm_result['required_return'] - ddm_result['dividend_growth']):.2f}%
+           = ₹{ddm_result.get('next_year_dps', 0):.2f} / ({ddm_result.get('required_return', 0):.2f}% - {ddm_result.get('dividend_growth', 0):.2f}%)
+           = ₹{ddm_result.get('next_year_dps', 0):.2f} / {(ddm_result.get('required_return', 10) - ddm_result.get('dividend_growth', 5)):.2f}%
            = ₹{calc_fv:.2f}
                             """, language="text")
                         
                         # 5-year dividend projections
-                        if 'projections' in ddm_result and ddm_result['projections']:
+                        if 'projections' in ddm_result and ddm_result.get('projections'):
                             st.markdown("---")
                             st.markdown("**📈 5-Year Dividend Projections**")
                             
