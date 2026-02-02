@@ -788,6 +788,51 @@ if time.time() - st.session_state.session_start_time > 3600:
     st.session_state.yahoo_request_count = 0
     st.session_state.session_start_time = time.time()
 
+# Fix text truncation in metrics and throughout the app
+st.markdown("""
+    <style>
+    /* Fix metric value truncation */
+    [data-testid="stMetricValue"] {
+        width: fit-content;
+        white-space: nowrap;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+    
+    /* Fix metric label truncation */
+    [data-testid="stMetricLabel"] {
+        width: fit-content;
+        white-space: nowrap;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+    
+    /* Fix metric container */
+    [data-testid="metric-container"] {
+        overflow: visible !important;
+        width: fit-content;
+        min-width: max-content;
+    }
+    
+    /* Fix metric delta truncation */
+    [data-testid="stMetricDelta"] {
+        white-space: nowrap;
+        overflow: visible !important;
+    }
+    
+    /* General fix for all div elements in columns */
+    [data-testid="column"] > div {
+        overflow: visible !important;
+    }
+    
+    /* Ensure proper spacing for columns */
+    [data-testid="column"] {
+        overflow: visible !important;
+        min-width: fit-content;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("🏦 DCF Valuation Engine")
 st.markdown("**Listed + Unlisted | Excel-Integrated | Traditional WACC**")
 
