@@ -17,6 +17,12 @@ def fetch_peer_financials(ticker_list, target_ticker=None, exchange_suffix="NS")
     Fetch comprehensive financial data for all peer companies
     Returns: DataFrame with all metrics
     """
+    # Use the shared CachedTickerData from DCF engine to prevent rate limits
+    try:
+        from PHASE5_DCF_valuation import CachedTickerData
+    except ImportError:
+        CachedTickerData = None
+
     peer_data = []
     
     for ticker in ticker_list:
@@ -27,7 +33,7 @@ def fetch_peer_financials(ticker_list, target_ticker=None, exchange_suffix="NS")
             else:
                 ticker_full = ticker
             
-            stock = yf.Ticker(ticker_full)
+            stock = CachedTickerData(ticker_full) if CachedTickerData else yf.Ticker(ticker_full)
             info = stock.info
             financials = stock.financials
             balance_sheet = stock.balance_sheet
