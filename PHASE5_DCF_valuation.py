@@ -8728,41 +8728,48 @@ def main():
                         )
                         
                         # Calculate WACC (using peer companies for beta)
-                        if peer_tickers_screener:
-                            wacc_result = calculate_wacc_unlisted(
-                                financials_screener,
-                                peer_tickers_screener,
-                                tax_rate_screener / 100
-                            )
-                        else:
-                            # Default WACC if no peers
-                            st.warning("⚠️ No peer tickers provided. Using default WACC assumptions.")
-                            wacc_result = {
-                                'wacc': 0.12,  # 12% default
-                                'cost_of_equity': 0.15,
-                                'cost_of_debt': 0.08,
-                                'beta': 1.0,
-                                'weight_equity': 0.7,
-                                'weight_debt': 0.3
-                            }
+                        wacc_details = calculate_wacc(financials_screener, tax_rate_screener / 100, peer_tickers=peer_tickers_screener)
+                        
+                        # Extract cash balance (index [0] is NEWEST)
+                        cash_balance = financials_screener['cash'][0] if financials_screener['cash'][0] > 0 else 0
                         
                         # Calculate DCF
-                        dcf_results_screener = calculate_dcf_value(
-                            projections_screener,
-                            wacc_result['wacc'],
-                            terminal_growth_screener / 100,
-                            financials_screener['st_debt'][-1] + financials_screener['lt_debt'][-1],
-                            financials_screener['cash'][-1],
-                            num_shares_screener
+                        valuation, error = calculate_dcf_valuation(
+                            projections_screener, wacc_details, terminal_growth_screener, num_shares_screener, cash_balance
                         )
                         
-                        # Add WACC details to results
-                        dcf_results_screener.update(wacc_result)
-                        dcf_results_screener['num_shares'] = num_shares_screener
-                        dcf_results_screener['tax_rate'] = tax_rate_screener / 100
+                        if error:
+                            st.error(error)
+                            st.stop()
                         
-                        # Display DCF results (use existing display function)
-                        display_dcf_results(dcf_results_screener, projections_screener, drivers_screener)
+                        # Store results
+                        dcf_results_screener = valuation
+                        
+                        # Display DCF results
+                        st.success("✅ DCF Valuation Complete!")
+                        
+                        # Key Metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Enterprise Value", f"₹ {dcf_results_screener['enterprise_value']:.2f} Lacs")
+                        with col2:
+                            st.metric("Equity Value", f"₹ {dcf_results_screener['equity_value']:.2f} Lacs")
+                        with col3:
+                            st.metric("Fair Value/Share", f"₹ {dcf_results_screener['fair_value_per_share']:.2f}")
+                        with col4:
+                            st.metric("WACC", f"{wacc_details['wacc']:.2f}%")
+                        
+                        # Show projections table
+                        st.markdown("#### 📊 Financial Projections")
+                        proj_df = pd.DataFrame({
+                            'Year': [f"Year {y}" for y in projections_screener['year']],
+                            'Revenue': projections_screener['revenue'],
+                            'EBITDA': projections_screener['ebitda'],
+                            'EBIT': projections_screener['ebit'],
+                            'NOPAT': projections_screener['nopat'],
+                            'FCF': projections_screener['fcf']
+                        })
+                        st.dataframe(proj_df, use_container_width=True)
                     
                     # ================================
                     # RUN DDM VALUATION
@@ -8814,8 +8821,74 @@ def main():
                         )
                         
                         if comp_val_results_screener:
-                            # Display comparative valuation (use existing display function)
-                            display_comparative_valuation(comp_val_results_screener)
+                            # Show comparables table
+                            st.markdown("### Comparable Companies")
+                            comp_df = pd.DataFrame(comp_val_results_screener['comparables'])
+                            if not comp_df.empty:
+                                display_comp_df = comp_df[['ticker', 'name', 'price', 'pe', 'pb', 'ps', 'ev_ebitda', 'ev_sales']]
+                                st.dataframe(display_comp_df.style.format({
+                                    'price': '₹{:.2f}',
+                                    'pe': '{:.2f}x',
+                                    'pb': '{:.2f}x',
+                                    'ps': '{:.2f}x',
+                                    'ev_ebitda': '{:.2f}x',
+                                    'ev_sales': '{:.2f}x'
+                                }), use_container_width=True)
+                            
+                            # Show multiples statistics
+                            st.markdown("### Peer Multiples Statistics")
+                            for multiple, stats in comp_val_results_screener['multiples_stats'].items():
+                                with st.expander(f"📊 {multiple.upper()} - Avg: {stats['average']:.2f}x, Median: {stats['median']:.2f}x"):
+                                    st.write(f"**Range:** {stats['min']:.2f}x - {stats['max']:.2f}x")
+                                    st.write(f"**Std Dev:** {stats['std']:.2f}x")
+                                    st.write(f"**Peer Values:** {', '.join([f'{v:.2f}x' for v in stats['values']])}")
+                            
+                            # Show implied valuations
+                            st.markdown("### Implied Fair Values")
+                            
+                            all_avg_values = []
+                            all_median_values = []
+                            
+                            for method_key, val_data in comp_val_results_screener['valuations'].items():
+                                st.markdown(f"#### {val_data['method']}")
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown("**Using Average Multiple:**")
+                                    st.write(val_data['formula_avg'])
+                                    st.metric("Fair Value (Avg)", f"₹{val_data['fair_value_avg']:.2f}")
+                                    all_avg_values.append(val_data['fair_value_avg'])
+                                
+                                with col2:
+                                    st.markdown("**Using Median Multiple:**")
+                                    st.write(val_data['formula_median'])
+                                    st.metric("Fair Value (Median)", f"₹{val_data['fair_value_median']:.2f}")
+                                    all_median_values.append(val_data['fair_value_median'])
+                                
+                                st.markdown("---")
+                            
+                            # Summary statistics
+                            if all_avg_values and all_median_values:
+                                st.markdown("### 📈 Comparative Valuation Summary")
+                                
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    st.metric("Average (All Methods)", f"₹{np.mean(all_avg_values):.2f}")
+                                    st.metric("Median (All Methods)", f"₹{np.median(all_median_values):.2f}")
+                                
+                                with col2:
+                                    st.metric("Min Fair Value", f"₹{min(all_avg_values + all_median_values):.2f}")
+                                    st.metric("Max Fair Value", f"₹{max(all_avg_values + all_median_values):.2f}")
+                                
+                                with col3:
+                                    if dcf_results_screener and dcf_results_screener['fair_value_per_share'] > 0:
+                                        st.metric("DCF Fair Value", f"₹{dcf_results_screener['fair_value_per_share']:.2f}")
+                                        combined_avg = (np.mean(all_avg_values) + dcf_results_screener['fair_value_per_share']) / 2
+                                        st.metric("DCF + Comp Avg", f"₹{combined_avg:.2f}")
+                        else:
+                            st.warning("Could not fetch comparable companies data")
                     
                     # ================================
                     # SUMMARY & DOWNLOAD

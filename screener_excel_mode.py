@@ -209,10 +209,13 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
     - Dividend Amount
     
     Returns:
-        dict: Financial metrics with 3 years of historical data
+        dict: Financial metrics with 3 years of historical data (NEWEST FIRST)
     """
     num_years = min(3, len(year_cols))
     last_years = year_cols[-num_years:]
+    
+    # REVERSE to match unlisted mode - NEWEST FIRST [0], OLDEST LAST [-1]
+    last_years = list(reversed(last_years))
     
     financials = {
         'years': last_years,
