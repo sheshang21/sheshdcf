@@ -13,6 +13,26 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 
+# Screener Excel Mode Module
+try:
+    from screener_excel_mode import (
+        parse_screener_excel_to_dataframes,
+        get_value_from_screener_df,
+        detect_screener_year_columns,
+        extract_screener_financials,
+        get_screener_shares_outstanding,
+        calculate_screener_ddm_valuation,
+        calculate_screener_rim_valuation,
+        generate_screener_valuation_excel,
+        display_screener_financial_summary,
+        display_screener_ddm_results,
+        display_screener_rim_results
+    )
+    SCREENER_MODE_AVAILABLE = True
+except ImportError as e:
+    SCREENER_MODE_AVAILABLE = False
+    SCREENER_MODE_ERROR = str(e)
+
 # Indian Stock Market APIs (fallback for Yahoo Finance)
 SCREENER_IMPORT_ERROR = None
 try:
@@ -5210,7 +5230,11 @@ def main():
             st.success("Cache cleared!")
             st.rerun()
 
-    mode = st.radio("Select Mode:", ["Listed Company (Yahoo Finance)", "Unlisted Company (Excel Upload)"], horizontal=True)
+    mode = st.radio("Select Mode:", 
+                    ["Listed Company (Yahoo Finance)", 
+                     "Unlisted Company (Excel Upload)",
+                     "Screener Excel Mode (Screener.in Template)"], 
+                    horizontal=True)
 
     if mode == "Listed Company (Yahoo Finance)":
         st.subheader("📈 Listed Company Valuation")
@@ -8397,6 +8421,428 @@ def main():
                                 st.info("💡 **Alternative:** Use **Tab 6 (Comparative Valuation)** for comprehensive peer analysis with multiples-based valuation")
                         else:
                             st.info("💡 Enter peer tickers above (e.g., 'RELIANCE, TATASTEEL') to see detailed peer comparison with 3D visualizations")
+
+
+    elif mode == "Screener Excel Mode (Screener.in Template)":
+        st.subheader("📊 Screener Excel Mode - Screener.in Template Format")
+        
+        st.info("""
+        **📋 Screener Excel Template Format:**
+        - **Sheet 1:** Balance Sheet (with years in Row 2, items in Column A)
+        - **Sheet 2:** Profit and Loss Account (with years in Row 2, items in Column A)
+        
+        Use the exact Screener.in export format for best results.
+        """)
+        
+        if not SCREENER_MODE_AVAILABLE:
+            st.error(f"❌ Screener Mode module not available: {SCREENER_MODE_ERROR}")
+            st.info("Please ensure screener_excel_mode.py is in the same directory as this file.")
+            st.stop()
+        
+        st.markdown("---")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            company_name_screener = st.text_input("Company Name:", key='screener_company_name')
+            excel_file_screener = st.file_uploader(
+                "Upload Screener Excel Template", 
+                type=['xlsx', 'xls'],
+                key='screener_excel_upload',
+                help="Upload Excel file with 'Balance Sheet' and 'Profit and Loss Account' sheets"
+            )
+            
+            st.markdown("---")
+            st.markdown("**📊 Peer Companies (Both Exchanges)**")
+            
+            # NSE Peers Box
+            nse_peers_screener = st.text_input(
+                "NSE Peer Tickers (comma-separated):",
+                placeholder="e.g., RELIANCE, TCS, INFY",
+                key='nse_peers_screener',
+                help="Enter NSE-listed peer companies for beta calculation"
+            )
+            
+            # BSE Peers Box
+            bse_peers_screener = st.text_input(
+                "BSE Peer Tickers (comma-separated):",
+                placeholder="e.g., RELIANCE, TCS, INFY",
+                key='bse_peers_screener',
+                help="Enter BSE-listed peer companies for beta calculation"
+            )
+            
+            # Combine peers with their exchange suffixes
+            peer_tickers_screener = ""
+            if nse_peers_screener.strip():
+                nse_list = [f"{t.strip()}.NS" if '.NS' not in t and '.BO' not in t else t.strip() 
+                           for t in nse_peers_screener.split(',') if t.strip()]
+                peer_tickers_screener = ",".join(nse_list)
+            if bse_peers_screener.strip():
+                bse_list = [f"{t.strip()}.BO" if '.NS' not in t and '.BO' not in t else t.strip() 
+                           for t in bse_peers_screener.split(',') if t.strip()]
+                if peer_tickers_screener:
+                    peer_tickers_screener += "," + ",".join(bse_list)
+                else:
+                    peer_tickers_screener = ",".join(bse_list)
+        
+        with col2:
+            # Get shares from Excel or manual input
+            num_shares_screener = st.number_input(
+                "Number of Shares Outstanding:", 
+                min_value=1, 
+                value=100, 
+                step=1,
+                key='screener_shares',
+                help="Will be auto-filled from Excel if available"
+            )
+            tax_rate_screener = st.number_input(
+                "Tax Rate (%):", 
+                min_value=0.0, 
+                max_value=100.0, 
+                value=25.0, 
+                step=0.5,
+                key='screener_tax'
+            )
+            terminal_growth_screener = st.number_input(
+                "Terminal Growth Rate (%):", 
+                min_value=0.0, 
+                max_value=10.0, 
+                value=4.0, 
+                step=0.5,
+                key='screener_terminal'
+            )
+            
+            # Valuation models to run
+            st.markdown("**🎯 Valuation Models**")
+            run_dcf_screener = st.checkbox("DCF (FCFF)", value=True, key='screener_dcf')
+            run_ddm_screener = st.checkbox("DDM (Dividend Discount)", value=True, key='screener_ddm')
+            run_rim_screener = st.checkbox("RIM (Residual Income)", value=True, key='screener_rim')
+            run_comp_screener = st.checkbox("Comparative Valuation", value=True, key='screener_comp')
+        
+        with st.expander("⚙️ Advanced Projection Assumptions - FULL CONTROL"):
+            st.info("💡 **Complete Control:** Override ANY projection parameter below. Leave at 0 or blank for auto-calculation from historical data.")
+            
+            st.markdown("### 📊 Revenue & Growth")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                rev_growth_override_screener = st.number_input(
+                    "Revenue Growth (%/year)", 
+                    min_value=0.0, max_value=100.0, value=0.0, step=0.5,
+                    key='screener_rev_growth',
+                    help="0 = Auto from historical CAGR"
+                )
+            with col2:
+                opex_margin_override_screener = st.number_input(
+                    "Operating Expense Margin (%)", 
+                    min_value=0.0, max_value=100.0, value=0.0, step=0.5,
+                    key='screener_opex_margin',
+                    help="0 = Auto from historical average"
+                )
+            with col3:
+                ebitda_margin_override_screener = st.number_input(
+                    "EBITDA Margin (%)", 
+                    min_value=0.0, max_value=100.0, value=0.0, step=0.5,
+                    key='screener_ebitda',
+                    help="0 = Calculated as Revenue - OpEx"
+                )
+            
+            st.markdown("### 🏗️ CapEx & Depreciation")
+            col4, col5, col6 = st.columns(3)
+            with col4:
+                capex_ratio_override_screener = st.number_input(
+                    "CapEx/Revenue (%)", 
+                    min_value=0.0, max_value=50.0, value=0.0, step=0.5,
+                    key='screener_capex_ratio',
+                    help="0 = Auto from historical average"
+                )
+            with col5:
+                depreciation_rate_override_screener = st.number_input(
+                    "Depreciation Rate (%)", 
+                    min_value=0.0, max_value=30.0, value=0.0, step=0.5,
+                    key='screener_dep_rate',
+                    help="0 = Auto calculated"
+                )
+            with col6:
+                depreciation_method_screener = st.selectbox(
+                    "Depreciation Method",
+                    ["Auto", "% of Fixed Assets", "% of Revenue", "Absolute Value"],
+                    key='screener_dep_method'
+                )
+            
+            st.markdown("### 💰 Working Capital Management")
+            col7, col8, col9 = st.columns(3)
+            with col7:
+                inventory_days_override_screener = st.number_input(
+                    "Inventory Days", 
+                    min_value=0.0, max_value=365.0, value=0.0, step=1.0,
+                    key='screener_inv_days',
+                    help="0 = Auto from historical average"
+                )
+            with col8:
+                debtor_days_override_screener = st.number_input(
+                    "Debtor/Receivables Days", 
+                    min_value=0.0, max_value=365.0, value=0.0, step=1.0,
+                    key='screener_deb_days',
+                    help="0 = Auto from historical average"
+                )
+            with col9:
+                creditor_days_override_screener = st.number_input(
+                    "Creditor/Payables Days", 
+                    min_value=0.0, max_value=365.0, value=0.0, step=1.0,
+                    key='screener_cred_days',
+                    help="0 = Auto from historical average"
+                )
+            
+            st.markdown("### 📈 Tax & Interest")
+            col10, col11, col12 = st.columns(3)
+            with col10:
+                interest_rate_override_screener = st.number_input(
+                    "Interest Rate (%)", 
+                    min_value=0.0, max_value=30.0, value=0.0, step=0.25,
+                    key='screener_interest',
+                    help="0 = Auto calculated from Debt"
+                )
+            with col11:
+                working_capital_as_pct_revenue_screener = st.number_input(
+                    "Working Capital % of Revenue", 
+                    min_value=0.0, max_value=50.0, value=0.0, step=0.5,
+                    key='screener_wc_pct',
+                    help="0 = Calculate from Inv+Deb-Cred days"
+                )
+            with col12:
+                projection_years_screener = st.number_input(
+                    "Projection Years", 
+                    min_value=3, max_value=15, value=5, step=1,
+                    key='screener_proj_years',
+                    help="Number of years to project forward"
+                )
+        
+        # Run valuation button
+        if excel_file_screener and company_name_screener and num_shares_screener:
+            if st.button("🚀 Run Screener Mode Valuation", type="primary", key="run_screener_dcf_btn"):
+                st.session_state.show_results_screener = True
+            
+            if st.session_state.get('show_results_screener', False):
+                with st.spinner("Processing Screener Excel..."):
+                    # Parse Excel using Screener mode parser
+                    df_bs_screener, df_pl_screener = parse_screener_excel_to_dataframes(excel_file_screener)
+                    
+                    if df_bs_screener is None or df_pl_screener is None:
+                        st.error("Failed to parse Screener Excel file")
+                        st.stop()
+                    
+                    # Detect year columns
+                    year_cols_screener = detect_screener_year_columns(df_bs_screener)
+                    
+                    if len(year_cols_screener) < 3:
+                        st.error("Need at least 3 years of historical data")
+                        st.stop()
+                    
+                    st.success(f"✅ Loaded {len(year_cols_screener)} years of data: {', '.join([y.replace('_', '') for y in year_cols_screener])}")
+                    
+                    # Try to get shares from Excel
+                    shares_from_excel = get_screener_shares_outstanding(df_bs_screener, year_cols_screener[-1])
+                    if shares_from_excel > 0:
+                        num_shares_screener = shares_from_excel
+                        st.info(f"📊 Auto-detected {num_shares_screener:,} shares from Excel")
+                    
+                    # Extract financials using Screener extraction
+                    financials_screener = extract_screener_financials(df_bs_screener, df_pl_screener, year_cols_screener)
+                    
+                    # Add num_shares to financials dict
+                    financials_screener['num_shares'] = num_shares_screener
+                    
+                    # Display financial summary
+                    display_screener_financial_summary(financials_screener)
+                    
+                    # ================================
+                    # BUSINESS MODEL CLASSIFICATION
+                    # ================================
+                    st.markdown("---")
+                    st.subheader("🏢 Business Model Classification")
+                    
+                    classification = classify_business_model(financials_screener, income_stmt=None, balance_sheet=None)
+                    
+                    # Show classification and check if FCFF DCF is allowed
+                    should_stop = show_classification_warning(classification)
+                    
+                    if should_stop and run_dcf_screener:
+                        st.warning("⚠️ DCF valuation skipped due to business model classification. Other models will still run.")
+                        run_dcf_screener = False
+                    
+                    st.markdown("---")
+                    
+                    # Calculate WC metrics
+                    wc_metrics = calculate_working_capital_metrics(financials_screener)
+                    
+                    # Show Working Capital Data Status
+                    wc_status_parts = []
+                    if wc_metrics.get('has_inventory', False) or (inventory_days_override_screener and inventory_days_override_screener > 0):
+                        inv_source = f"User Override: {inventory_days_override_screener} days" if inventory_days_override_screener and inventory_days_override_screener > 0 else f"Historical: {wc_metrics['avg_inv_days']:.1f} days"
+                        wc_status_parts.append(f"✅ Inventory ({inv_source})")
+                    else:
+                        wc_status_parts.append("⚠️ Inventory (No data)")
+                    
+                    if wc_metrics.get('has_receivables', False) or (debtor_days_override_screener and debtor_days_override_screener > 0):
+                        deb_source = f"User Override: {debtor_days_override_screener} days" if debtor_days_override_screener and debtor_days_override_screener > 0 else f"Historical: {wc_metrics['avg_deb_days']:.1f} days"
+                        wc_status_parts.append(f"✅ Debtors ({deb_source})")
+                    else:
+                        wc_status_parts.append("⚠️ Debtors (No data)")
+                    
+                    if wc_metrics.get('has_payables', False) or (creditor_days_override_screener and creditor_days_override_screener > 0):
+                        cred_source = f"User Override: {creditor_days_override_screener} days" if creditor_days_override_screener and creditor_days_override_screener > 0 else f"Historical: {wc_metrics['avg_cred_days']:.1f} days"
+                        wc_status_parts.append(f"✅ Creditors ({cred_source})")
+                    else:
+                        wc_status_parts.append("⚠️ Creditors (No data)")
+                    
+                    st.info(f"🔍 **Working Capital Projection Status:** {' | '.join(wc_status_parts)}")
+                    
+                    # Initialize results containers
+                    dcf_results_screener = None
+                    ddm_results_screener = None
+                    rim_results_screener = None
+                    comp_val_results_screener = None
+                    projections_screener = None
+                    
+                    # ================================
+                    # RUN DCF VALUATION
+                    # ================================
+                    if run_dcf_screener:
+                        st.markdown("---")
+                        st.subheader("💰 DCF (FCFF) Valuation")
+                        
+                        # Project financials (same as unlisted mode)
+                        projections_screener, drivers_screener = project_financials(
+                            financials_screener, wc_metrics, projection_years_screener, tax_rate_screener,
+                            rev_growth_override_screener if rev_growth_override_screener > 0 else None,
+                            opex_margin_override_screener if opex_margin_override_screener > 0 else None,
+                            capex_ratio_override_screener if capex_ratio_override_screener > 0 else None,
+                            ebitda_margin_override=ebitda_margin_override_screener if ebitda_margin_override_screener > 0 else None,
+                            depreciation_rate_override=depreciation_rate_override_screener if depreciation_rate_override_screener > 0 else None,
+                            depreciation_method=depreciation_method_screener,
+                            inventory_days_override=inventory_days_override_screener if inventory_days_override_screener > 0 else None,
+                            debtor_days_override=debtor_days_override_screener if debtor_days_override_screener > 0 else None,
+                            creditor_days_override=creditor_days_override_screener if creditor_days_override_screener > 0 else None,
+                            interest_rate_override=interest_rate_override_screener if interest_rate_override_screener > 0 else None,
+                            working_capital_as_pct_revenue=working_capital_as_pct_revenue_screener if working_capital_as_pct_revenue_screener > 0 else None
+                        )
+                        
+                        # Calculate WACC (using peer companies for beta)
+                        if peer_tickers_screener:
+                            wacc_result = calculate_wacc_unlisted(
+                                financials_screener,
+                                peer_tickers_screener,
+                                tax_rate_screener / 100
+                            )
+                        else:
+                            # Default WACC if no peers
+                            st.warning("⚠️ No peer tickers provided. Using default WACC assumptions.")
+                            wacc_result = {
+                                'wacc': 0.12,  # 12% default
+                                'cost_of_equity': 0.15,
+                                'cost_of_debt': 0.08,
+                                'beta': 1.0,
+                                'weight_equity': 0.7,
+                                'weight_debt': 0.3
+                            }
+                        
+                        # Calculate DCF
+                        dcf_results_screener = calculate_dcf_value(
+                            projections_screener,
+                            wacc_result['wacc'],
+                            terminal_growth_screener / 100,
+                            financials_screener['st_debt'][-1] + financials_screener['lt_debt'][-1],
+                            financials_screener['cash'][-1],
+                            num_shares_screener
+                        )
+                        
+                        # Add WACC details to results
+                        dcf_results_screener.update(wacc_result)
+                        dcf_results_screener['num_shares'] = num_shares_screener
+                        dcf_results_screener['tax_rate'] = tax_rate_screener / 100
+                        
+                        # Display DCF results (use existing display function)
+                        display_dcf_results(dcf_results_screener, projections_screener, drivers_screener)
+                    
+                    # ================================
+                    # RUN DDM VALUATION
+                    # ================================
+                    if run_ddm_screener:
+                        st.markdown("---")
+                        ddm_results_screener = calculate_screener_ddm_valuation(
+                            financials_screener,
+                            num_shares_screener,
+                            required_return=0.12,
+                            growth_rate=0.05
+                        )
+                        
+                        if ddm_results_screener:
+                            display_screener_ddm_results(ddm_results_screener)
+                    
+                    # ================================
+                    # RUN RIM VALUATION
+                    # ================================
+                    if run_rim_screener:
+                        st.markdown("---")
+                        rim_results_screener = calculate_screener_rim_valuation(
+                            financials_screener,
+                            num_shares_screener,
+                            required_return=0.12,
+                            projection_years=5,
+                            terminal_growth=terminal_growth_screener / 100
+                        )
+                        
+                        if rim_results_screener:
+                            display_screener_rim_results(rim_results_screener)
+                    
+                    # ================================
+                    # RUN COMPARATIVE VALUATION
+                    # ================================
+                    if run_comp_screener and peer_tickers_screener:
+                        st.markdown("---")
+                        st.subheader("📊 Comparative Valuation (Peer Multiples)")
+                        
+                        # Use existing comparative valuation function
+                        comp_val_results_screener = perform_comparative_valuation(
+                            target_ticker=None,  # Unlisted
+                            comp_tickers_str=peer_tickers_screener,
+                            target_financials=financials_screener,
+                            target_shares=num_shares_screener,
+                            exchange_suffix="NS",
+                            projections=projections_screener if run_dcf_screener else None,
+                            use_screener_peers=False  # Use Yahoo Finance for peers
+                        )
+                        
+                        if comp_val_results_screener:
+                            # Display comparative valuation (use existing display function)
+                            display_comparative_valuation(comp_val_results_screener)
+                    
+                    # ================================
+                    # SUMMARY & DOWNLOAD
+                    # ================================
+                    st.markdown("---")
+                    st.subheader("📥 Download Comprehensive Valuation Report")
+                    
+                    # Generate Excel report
+                    excel_buffer = generate_screener_valuation_excel(
+                        company_name_screener,
+                        financials_screener,
+                        dcf_results_screener,
+                        ddm_results_screener,
+                        rim_results_screener,
+                        comp_val_results_screener,
+                        None  # peer_comparison
+                    )
+                    
+                    st.download_button(
+                        label="📊 Download Excel Report",
+                        data=excel_buffer,
+                        file_name=f"{company_name_screener}_Screener_Valuation_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    
+                    st.success("✅ Screener Mode Valuation Complete!")
+
 
         # Footer
         st.markdown("---")
