@@ -26,7 +26,8 @@ try:
         generate_screener_valuation_excel,
         display_screener_financial_summary,
         display_screener_ddm_results,
-        display_screener_rim_results
+        display_screener_rim_results,
+        fetch_ticker_data_for_screener
     )
     SCREENER_MODE_AVAILABLE = True
 except ImportError as e:
