@@ -8654,6 +8654,95 @@ def main():
                     help="Number of years to project forward"
                 )
         
+        # ================================
+        # DDM & RIM PARAMETERS FOR SCREENER MODE
+        # ================================
+        with st.expander("💎 DDM & RIM Parameters (Leave at 0 for Auto-Calculation)"):
+            st.info("💡 **Note:** These parameters apply to Dividend Discount Model and Residual Income Model. Leave at 0 for auto-calculation from actual data.")
+        
+            st.markdown("### 💰 Dividend Discount Model (DDM) Parameters")
+            col_ddm1, col_ddm2, col_ddm3 = st.columns(3)
+        
+            with col_ddm1:
+                ddm_dividend_growth_screener = st.number_input(
+                    "Dividend Growth Rate (%)",
+                    min_value=0.0,
+                    max_value=30.0,
+                    value=0.0,
+                    step=0.5,
+                    key='screener_ddm_div_growth',
+                    help="0 = Auto-calculate from historical dividend data. Used in Gordon Growth Model."
+                )
+        
+            with col_ddm2:
+                ddm_required_return_screener = st.number_input(
+                    "Required Return / Cost of Equity (%)",
+                    min_value=5.0,
+                    max_value=30.0,
+                    value=12.0,
+                    step=0.5,
+                    key='screener_ddm_required_return',
+                    help="Discount rate for DDM. Usually = Cost of Equity from CAPM."
+                )
+            
+            with col_ddm3:
+                ddm_payout_ratio_screener = st.number_input(
+                    "Payout Ratio (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=0.0,
+                    step=5.0,
+                    key='screener_ddm_payout',
+                    help="0 = Auto-calculate from historical data. % of earnings paid as dividends."
+                )
+        
+            st.markdown("### 🏢 Residual Income Model (RIM) Parameters")
+            col_rim1, col_rim2, col_rim3, col_rim4 = st.columns(4)
+        
+            with col_rim1:
+                rim_required_return_screener = st.number_input(
+                    "Required Return (%)",
+                    min_value=5.0,
+                    max_value=30.0,
+                    value=12.0,
+                    step=0.5,
+                    key='screener_rim_required_return',
+                    help="Discount rate for RIM. Usually = Cost of Equity."
+                )
+        
+            with col_rim2:
+                rim_assumed_roe_screener = st.number_input(
+                    "Assumed ROE (%)",
+                    min_value=0.0,
+                    max_value=50.0,
+                    value=0.0,
+                    step=1.0,
+                    key='screener_rim_roe',
+                    help="0 = Auto-calculate from historical data. Return on Equity assumption."
+                )
+        
+            with col_rim3:
+                rim_terminal_growth_screener = st.number_input(
+                    "Terminal Growth (%)",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=0.0,
+                    step=0.5,
+                    key='screener_rim_terminal_growth',
+                    help="0 = Use same as DCF terminal growth. Long-term perpetual growth rate."
+                )
+        
+            with col_rim4:
+                rim_projection_years_screener = st.number_input(
+                    "Projection Years",
+                    min_value=0,
+                    max_value=15,
+                    value=0,
+                    step=1,
+                    key='screener_rim_proj_years',
+                    help="0 = Use same as DCF projection years (5). Number of years to project."
+                )
+        
         # Run valuation button
         if excel_file_screener and company_name_screener and num_shares_screener:
             if st.button("🚀 Run Screener Mode Valuation", type="primary", key="run_screener_dcf_btn"):
@@ -8832,23 +8921,34 @@ def main():
                     # RUN DDM VALUATION
                     # ================================
                     if run_ddm_screener:
+                        # Use user-provided parameters or defaults
+                        ddm_growth = ddm_dividend_growth_screener / 100 if ddm_dividend_growth_screener > 0 else 0.05
+                        ddm_req_return = ddm_required_return_screener / 100
+                        
                         ddm_results_screener = calculate_screener_ddm_valuation(
                             financials_screener,
                             num_shares_screener,
-                            required_return=0.12,
-                            growth_rate=0.05
+                            required_return=ddm_req_return,
+                            growth_rate=ddm_growth
                         )
                     
                     # ================================
                     # RUN RIM VALUATION
                     # ================================
                     if run_rim_screener:
+                        # Use user-provided parameters or defaults
+                        rim_req_return = rim_required_return_screener / 100
+                        rim_proj_yrs = rim_projection_years_screener if rim_projection_years_screener > 0 else 5
+                        rim_term_growth = rim_terminal_growth_screener / 100 if rim_terminal_growth_screener > 0 else terminal_growth_screener / 100
+                        rim_roe = rim_assumed_roe_screener / 100 if rim_assumed_roe_screener > 0 else None
+                        
                         rim_results_screener = calculate_screener_rim_valuation(
                             financials_screener,
                             num_shares_screener,
-                            required_return=0.12,
-                            projection_years=5,
-                            terminal_growth=terminal_growth_screener / 100
+                            required_return=rim_req_return,
+                            projection_years=rim_proj_yrs,
+                            terminal_growth=rim_term_growth,
+                            assumed_roe=rim_roe
                         )
                     
                     # ================================

@@ -538,6 +538,14 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
     
     avg_historical_growth = np.mean(historical_growth_rates) if historical_growth_rates else growth_rate
     
+    # Use provided growth_rate if it's not the default (0.05), otherwise use historical
+    # If growth_rate is 0.05 (default), use historical growth
+    # If growth_rate is different, user has overridden it - use that
+    if abs(growth_rate - 0.05) > 0.001:  # User has provided a custom growth rate
+        final_growth_rate = growth_rate
+    else:  # Use historical growth
+        final_growth_rate = avg_historical_growth
+    
     # Use latest non-zero dividend (in LACS)
     latest_dividend = next((d for d in reversed(dividends) if d > 0), 0)
     
@@ -596,7 +604,7 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
 # RIM (RESIDUAL INCOME MODEL) FOR SCREENER
 # ================================
 
-def calculate_screener_rim_valuation(financials, num_shares, required_return=0.12, projection_years=5, terminal_growth=0.04):
+def calculate_screener_rim_valuation(financials, num_shares, required_return=0.12, projection_years=5, terminal_growth=0.04, assumed_roe=None):
     """
     Calculate RIM (Residual Income Model) valuation
     
@@ -610,6 +618,7 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
         required_return: Required rate of return (default 12%)
         projection_years: Number of years to project (default 5)
         terminal_growth: Terminal growth rate (default 4%)
+        assumed_roe: Override ROE assumption (None = auto-calculate from historical data)
     
     Returns:
         dict: RIM valuation results
@@ -637,7 +646,7 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
             if financials['equity'][i] > 0:
                 roe = financials['net_profit'][i] / financials['equity'][i]
                 roe_values.append(roe)
-        avg_roe = np.mean(roe_values) if roe_values else 0.15  # Default 15%
+        avg_historical_roe = np.mean(roe_values) if roe_values else 0.15  # Default 15%
         
         # Calculate earnings growth rate
         earnings_growth_rates = []
@@ -647,8 +656,11 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
                 earnings_growth_rates.append(growth)
         avg_earnings_growth = np.mean(earnings_growth_rates) if earnings_growth_rates else 0.08  # Default 8%
     else:
-        avg_roe = 0.15
+        avg_historical_roe = 0.15
         avg_earnings_growth = 0.08
+    
+    # Use assumed_roe if provided, otherwise use historical
+    avg_roe = assumed_roe if assumed_roe is not None and assumed_roe > 0 else avg_historical_roe
     
     # Project residual income
     residual_incomes = []
