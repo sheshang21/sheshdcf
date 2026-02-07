@@ -412,10 +412,11 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
     if not financials or 'dividends' not in financials or num_shares <= 0:
         return None
     
-    dividends = financials['dividends']
+    # Convert None/NaN to 0 for blank cells
+    dividends = [float(d) if d and not (isinstance(d, float) and np.isnan(d)) else 0.0 for d in financials['dividends']]
     years = financials.get('years', [])
     
-    # Filter out zero dividends
+    # Filter out zero dividends for analysis
     non_zero_divs = [d for d in dividends if d > 0]
     
     if len(non_zero_divs) < 2:
@@ -427,7 +428,7 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
             'total_intrinsic_value': 0
         }
     
-    # Calculate historical dividend growth rate
+    # Calculate historical dividend growth rate (only for non-zero consecutive years)
     historical_growth_rates = []
     for i in range(1, len(dividends)):
         if dividends[i-1] > 0 and dividends[i] > 0:
@@ -436,8 +437,18 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
     
     avg_historical_growth = np.mean(historical_growth_rates) if historical_growth_rates else growth_rate
     
-    # Use latest dividend
-    latest_dividend = dividends[-1]
+    # Use latest non-zero dividend
+    latest_dividend = next((d for d in reversed(dividends) if d > 0), 0)
+    
+    if latest_dividend == 0:
+        return {
+            'model': 'DDM',
+            'status': 'No Recent Dividend',
+            'message': 'No dividend paid in recent years',
+            'intrinsic_value_per_share': 0,
+            'total_intrinsic_value': 0
+        }
+    
     dps = latest_dividend / num_shares  # Dividend per share
     
     # Gordon Growth Model: P = D1 / (r - g)
@@ -520,7 +531,7 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
     # Calculate historical ROE and growth rate
     if len(financials['equity']) >= 2 and len(financials['net_profit']) >= 2:
         roe_values = []
-        for i in range(len(equity)):
+        for i in range(len(financials['equity'])):
             if financials['equity'][i] > 0:
                 roe = financials['net_profit'][i] / financials['equity'][i]
                 roe_values.append(roe)

@@ -8776,39 +8776,22 @@ def main():
                             st.metric("Fair Value/Share", f"₹ {dcf_results_screener['fair_value_per_share']:.2f}")
                         with col4:
                             st.metric("WACC", f"{wacc_details['wacc']:.2f}%")
-                        
-                        # Show projections table
-                        st.markdown("#### 📊 Financial Projections")
-                        proj_df = pd.DataFrame({
-                            'Year': [f"Year {y}" for y in projections_screener['year']],
-                            'Revenue': projections_screener['revenue'],
-                            'EBITDA': projections_screener['ebitda'],
-                            'EBIT': projections_screener['ebit'],
-                            'NOPAT': projections_screener['nopat'],
-                            'FCFF': projections_screener['fcff']
-                        })
-                        st.dataframe(proj_df, use_container_width=True)
                     
                     # ================================
                     # RUN DDM VALUATION
                     # ================================
                     if run_ddm_screener:
-                        st.markdown("---")
                         ddm_results_screener = calculate_screener_ddm_valuation(
                             financials_screener,
                             num_shares_screener,
                             required_return=0.12,
                             growth_rate=0.05
                         )
-                        
-                        if ddm_results_screener:
-                            display_screener_ddm_results(ddm_results_screener)
                     
                     # ================================
                     # RUN RIM VALUATION
                     # ================================
                     if run_rim_screener:
-                        st.markdown("---")
                         rim_results_screener = calculate_screener_rim_valuation(
                             financials_screener,
                             num_shares_screener,
@@ -8816,18 +8799,11 @@ def main():
                             projection_years=5,
                             terminal_growth=terminal_growth_screener / 100
                         )
-                        
-                        if rim_results_screener:
-                            display_screener_rim_results(rim_results_screener)
                     
                     # ================================
                     # RUN COMPARATIVE VALUATION
                     # ================================
                     if run_comp_screener and peer_tickers_screener:
-                        st.markdown("---")
-                        st.subheader("📊 Comparative Valuation (Peer Multiples)")
-                        
-                        # Use existing comparative valuation function
                         comp_val_results_screener = perform_comparative_valuation(
                             target_ticker=None,  # Unlisted
                             comp_tickers_str=peer_tickers_screener,
@@ -8837,8 +8813,212 @@ def main():
                             projections=projections_screener if run_dcf_screener else None,
                             use_screener_peers=False  # Use Yahoo Finance for peers
                         )
+                    
+                    # ================================
+                    # TABBED DISPLAY - CONSISTENT WITH UNLISTED MODE
+                    # ================================
+                    st.markdown("---")
+                    
+                    # Build tab list based on what was run
+                    tab_list = ["📊 Historical Financials"]
+                    if run_dcf_screener:
+                        tab_list.extend(["📈 Projections", "💰 DCF Details"])
+                    if run_ddm_screener:
+                        tab_list.append("💸 DDM Valuation")
+                    if run_rim_screener:
+                        tab_list.append("📚 RIM Valuation")
+                    if run_comp_screener and peer_tickers_screener:
+                        tab_list.append("📊 Comparative Valuation")
+                    
+                    tabs = st.tabs(tab_list)
+                    tab_idx = 0
+                    
+                    # Tab 1: Historical Financials
+                    with tabs[tab_idx]:
+                        st.subheader("Historical Financials")
                         
-                        if comp_val_results_screener:
+                        hist_df = pd.DataFrame({
+                            'Year': [str(y) for y in financials_screener['years']],
+                            'Revenue': financials_screener['revenue'],
+                            'Operating Expenses': financials_screener['opex'],
+                            'EBITDA': financials_screener['ebitda'],
+                            'Depreciation': financials_screener['depreciation'],
+                            'EBIT': financials_screener['ebit'],
+                            'Interest': financials_screener['interest'],
+                            'Tax': financials_screener['tax'],
+                            'NOPAT': financials_screener['nopat']
+                        })
+                        numeric_cols = hist_df.select_dtypes(include=[np.number]).columns.tolist()
+                        format_dict = {col: '{:.2f}' for col in numeric_cols}
+                        st.dataframe(hist_df.style.format(format_dict), use_container_width=True)
+                        
+                        st.subheader("Balance Sheet Metrics")
+                        bs_df = pd.DataFrame({
+                            'Year': [str(y) for y in financials_screener['years']],
+                            'Fixed Assets': financials_screener['fixed_assets'],
+                            'Inventory': financials_screener['inventory'],
+                            'Receivables': financials_screener['receivables'],
+                            'Payables': financials_screener['payables'],
+                            'Equity': financials_screener['equity'],
+                            'ST Debt': financials_screener['st_debt'],
+                            'LT Debt': financials_screener['lt_debt']
+                        })
+                        numeric_cols = bs_df.select_dtypes(include=[np.number]).columns.tolist()
+                        format_dict = {col: '{:.2f}' for col in numeric_cols}
+                        st.dataframe(bs_df.style.format(format_dict), use_container_width=True)
+                    
+                    tab_idx += 1
+                    
+                    # Tab 2: Projections (if DCF was run)
+                    if run_dcf_screener:
+                        with tabs[tab_idx]:
+                            st.subheader(f"Projected Financials ({projection_years_screener} Years)")
+                            
+                            proj_df = pd.DataFrame({
+                                'Year': [f"Year {y}" for y in projections_screener['year']],
+                                'Revenue': projections_screener['revenue'],
+                                'EBITDA': projections_screener['ebitda'],
+                                'EBIT': projections_screener['ebit'],
+                                'NOPAT': projections_screener['nopat'],
+                                'CapEx': projections_screener['capex'],
+                                'Δ WC': projections_screener['delta_wc'],
+                                'FCFF': projections_screener['fcff']
+                            })
+                            numeric_cols = proj_df.select_dtypes(include=[np.number]).columns.tolist()
+                            format_dict = {col: '{:.2f}' for col in numeric_cols}
+                            st.dataframe(proj_df.style.format(format_dict), use_container_width=True)
+                            
+                            st.info(f"**Key Drivers:** Revenue Growth: {drivers_screener['avg_growth']:.2f}% | Opex Margin: {drivers_screener['avg_opex_margin']:.2f}% | CapEx/Revenue: {drivers_screener['avg_capex_ratio']:.2f}%")
+                        
+                        tab_idx += 1
+                        
+                        # Tab 3: DCF Details
+                        with tabs[tab_idx]:
+                            st.subheader("DCF Valuation Details")
+                            
+                            st.markdown("### Enterprise Value Build-up")
+                            ev_df = pd.DataFrame({
+                                'Component': ['Sum of PV(FCFF)', 'PV(Terminal Value)', 'Enterprise Value'],
+                                'Value (₹ Lacs)': [
+                                    dcf_results_screener['sum_pv_fcff'],
+                                    dcf_results_screener['pv_terminal_value'],
+                                    dcf_results_screener['enterprise_value']
+                                ]
+                            })
+                            st.dataframe(ev_df.style.format({'Value (₹ Lacs)': '{:.2f}'}), use_container_width=True)
+                            
+                            st.markdown("### Equity Value Calculation")
+                            equity_df = pd.DataFrame({
+                                'Component': ['Enterprise Value', '(-) Total Debt', '(+) Cash', 'Equity Value', 'Number of Shares', 'Fair Value per Share'],
+                                'Value': [
+                                    f"₹ {dcf_results_screener['enterprise_value']:.2f} Lacs",
+                                    f"₹ {dcf_results_screener['total_debt']:.2f} Lacs",
+                                    f"₹ {dcf_results_screener['cash']:.2f} Lacs",
+                                    f"₹ {dcf_results_screener['equity_value']:.2f} Lacs",
+                                    f"{num_shares_screener:,.0f}",
+                                    f"₹ {dcf_results_screener['fair_value_per_share']:.2f}"
+                                ]
+                            })
+                            st.table(equity_df)
+                            
+                            st.info(f"**Terminal Value % of EV:** {dcf_results_screener['tv_percentage']:.1f}%")
+                        
+                        tab_idx += 1
+                    
+                    # Tab: DDM Valuation
+                    if run_ddm_screener:
+                        with tabs[tab_idx]:
+                            st.subheader("💸 Dividend Discount Model (DDM)")
+                            if ddm_results_screener:
+                                display_screener_ddm_results(ddm_results_screener)
+                            else:
+                                st.warning("DDM results not available")
+                        tab_idx += 1
+                    
+                    # Tab: RIM Valuation
+                    if run_rim_screener:
+                        with tabs[tab_idx]:
+                            st.subheader("📚 Residual Income Model (RIM)")
+                            if rim_results_screener:
+                                display_screener_rim_results(rim_results_screener)
+                            else:
+                                st.warning("RIM results not available")
+                        tab_idx += 1
+                    
+                    # Tab: Comparative Valuation
+                    if run_comp_screener and peer_tickers_screener:
+                        with tabs[tab_idx]:
+                            st.subheader("📊 Comparative Valuation (Peer Multiples)")
+                            
+                            if comp_val_results_screener:
+                                # Show comparables table
+                                st.markdown("### Comparable Companies")
+                                comp_df = pd.DataFrame(comp_val_results_screener['comparables'])
+                                if not comp_df.empty:
+                                    display_comp_df = comp_df[['ticker', 'name', 'price', 'pe', 'pb', 'ps', 'ev_ebitda', 'ev_sales']]
+                                    st.dataframe(display_comp_df.style.format({
+                                        'price': '₹{:.2f}',
+                                        'pe': '{:.2f}x',
+                                        'pb': '{:.2f}x',
+                                        'ps': '{:.2f}x',
+                                        'ev_ebitda': '{:.2f}x',
+                                        'ev_sales': '{:.2f}x'
+                                    }), use_container_width=True)
+                                
+                                # Show multiples statistics
+                                st.markdown("### Peer Multiples Statistics")
+                                for multiple, stats in comp_val_results_screener['multiples_stats'].items():
+                                    with st.expander(f"📊 {multiple.upper()} - Avg: {stats['average']:.2f}x, Median: {stats['median']:.2f}x"):
+                                        st.write(f"**Range:** {stats['min']:.2f}x - {stats['max']:.2f}x")
+                                        st.write(f"**Std Dev:** {stats['std']:.2f}x")
+                                        st.write(f"**Peer Values:** {', '.join([f'{v:.2f}x' for v in stats['values']])}")
+                                
+                                # Show implied valuations
+                                st.markdown("### Implied Fair Values")
+                                
+                                all_avg_values = []
+                                all_median_values = []
+                                
+                                for method_key, val_data in comp_val_results_screener['valuations'].items():
+                                    st.markdown(f"#### {val_data['method']}")
+                                    
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.markdown("**Using Average Multiple:**")
+                                        st.write(val_data['formula_avg'])
+                                        st.metric("Fair Value (Avg)", f"₹{val_data['fair_value_avg']:.2f}")
+                                        all_avg_values.append(val_data['fair_value_avg'])
+                                    
+                                    with col2:
+                                        st.markdown("**Using Median Multiple:**")
+                                        st.write(val_data['formula_median'])
+                                        st.metric("Fair Value (Median)", f"₹{val_data['fair_value_median']:.2f}")
+                                        all_median_values.append(val_data['fair_value_median'])
+                                    
+                                    st.markdown("---")
+                                
+                                # Summary statistics
+                                if all_avg_values and all_median_values:
+                                    st.markdown("### 📈 Comparative Valuation Summary")
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        st.metric("Average (All Methods)", f"₹{np.mean(all_avg_values):.2f}")
+                                        st.metric("Median (All Methods)", f"₹{np.median(all_median_values):.2f}")
+                                    
+                                    with col2:
+                                        st.metric("Min Fair Value", f"₹{min(all_avg_values + all_median_values):.2f}")
+                                        st.metric("Max Fair Value", f"₹{max(all_avg_values + all_median_values):.2f}")
+                                    
+                                    with col3:
+                                        if dcf_results_screener and dcf_results_screener['fair_value_per_share'] > 0:
+                                            st.metric("DCF Fair Value", f"₹{dcf_results_screener['fair_value_per_share']:.2f}")
+                                            combined_avg = (np.mean(all_avg_values) + dcf_results_screener['fair_value_per_share']) / 2
+                                            st.metric("DCF + Comp Avg", f"₹{combined_avg:.2f}")
+                            else:
+                                st.warning("Could not fetch comparable companies data")
                             # Show comparables table
                             st.markdown("### Comparable Companies")
                             comp_df = pd.DataFrame(comp_val_results_screener['comparables'])
