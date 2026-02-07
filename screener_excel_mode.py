@@ -389,14 +389,20 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         # EBIT = EBITDA - Depreciation
         ebit = ebitda - depreciation
         
-        # **CRITICAL FIX**: NOPAT calculation using ACTUAL TAX, not PBT
+        # **CRITICAL FIX**: NOPAT calculation 
+        # Instead of NOPAT = EBIT * (1 - tax_rate), use:
+        # NOPAT = Net Profit + Interest * (1 - tax_rate)
+        # This is more reliable when Excel has simplified P&L structure
+        
         # Calculate effective tax rate from actual tax paid
         if pbt > 0 and abs(tax) > 0:
             effective_tax_rate = abs(tax) / pbt
         else:
             effective_tax_rate = 0.25  # Default 25%
         
-        nopat = ebit * (1 - effective_tax_rate)
+        # NOPAT = PAT + Interest * (1 - Tax Rate)
+        # This represents operating profit after tax, adding back interest (net of tax shield)
+        nopat = net_profit + (interest * (1 - effective_tax_rate))
         
         # **CONVERT FROM CRORES TO LACS (multiply by 100)**
         financials['revenue'].append(revenue * 100)
