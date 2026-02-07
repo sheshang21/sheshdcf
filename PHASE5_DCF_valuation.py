@@ -8434,6 +8434,24 @@ def main():
         Use the exact Screener.in export format for best results.
         """)
         
+        # Add template download button
+        st.markdown("#### 📥 Download Screener Template")
+        st.caption("Download the pre-configured template that matches Screener.in format")
+        
+        try:
+            with open('Screener_template.xlsx', 'rb') as f:
+                template_bytes = f.read()
+            
+            st.download_button(
+                label="📥 Download Screener Template",
+                data=template_bytes,
+                file_name="Screener_Template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download this template matching Screener.in export format"
+            )
+        except FileNotFoundError:
+            st.warning("⚠️ Screener_template.xlsx not found in the current directory")
+        
         if not SCREENER_MODE_AVAILABLE:
             st.error(f"❌ Screener Mode module not available: {SCREENER_MODE_ERROR}")
             st.info("Please ensure screener_excel_mode.py is in the same directory as this file.")
@@ -8767,7 +8785,7 @@ def main():
                             'EBITDA': projections_screener['ebitda'],
                             'EBIT': projections_screener['ebit'],
                             'NOPAT': projections_screener['nopat'],
-                            'FCF': projections_screener['fcf']
+                            'FCFF': projections_screener['fcff']
                         })
                         st.dataframe(proj_df, use_container_width=True)
                     
