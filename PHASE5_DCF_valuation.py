@@ -8934,6 +8934,10 @@ def main():
                             with col_avg3:
                                 st.metric("Average Upside/Downside", f"{avg_upside:+.1f}%", 
                                          delta=f"₹{avg_fair_value - current_price_screener:+.2f}")
+                            
+                            # Add Gauge Chart
+                            st.plotly_chart(create_price_vs_value_gauge(current_price_screener, avg_fair_value), 
+                                          use_container_width=True)
                         else:
                             st.info("No valid fair values calculated yet")
                         

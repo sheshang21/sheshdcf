@@ -141,11 +141,12 @@ def parse_screener_excel_to_dataframes(excel_file):
 
 def get_value_from_screener_df(df, item_name, year_col):
     """
-    Extract value from Screener DataFrame by item name (case-insensitive partial match)
+    Extract value from Screener DataFrame by item name (case-insensitive match)
+    Tries exact match first, then partial match
     
     Args:
         df: DataFrame with 'Item' column and year columns
-        item_name: Item to search for (partial match, case-insensitive)
+        item_name: Item to search for
         year_col: Year column name (e.g., '_2023')
     
     Returns:
@@ -155,6 +156,15 @@ def get_value_from_screener_df(df, item_name, year_col):
         return 0.0
     
     item_name_lower = item_name.lower()
+    
+    # Try exact match first (case-insensitive)
+    exact_mask = df['Item'].str.lower().str.strip() == item_name_lower
+    exact_matching = df[exact_mask]
+    
+    if not exact_matching.empty and year_col in exact_matching.columns:
+        return float(exact_matching.iloc[0][year_col])
+    
+    # Fall back to partial match (contains)
     mask = df['Item'].str.lower().str.contains(item_name_lower, na=False, regex=False)
     matching = df[mask]
     
