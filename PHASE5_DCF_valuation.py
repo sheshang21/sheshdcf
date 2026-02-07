@@ -8667,6 +8667,11 @@ def main():
                     # Extract financials using Screener extraction
                     financials_screener = extract_screener_financials(df_bs_screener, df_pl_screener, year_cols_screener)
                     
+                    # Auto-fill shares if available from Excel
+                    if financials_screener.get('num_shares') and financials_screener['num_shares'] > 0:
+                        num_shares_screener = financials_screener['num_shares']
+                        st.success(f"✅ Auto-filled shares from Excel: {num_shares_screener:,} shares")
+                    
                     # Add num_shares to financials dict
                     financials_screener['num_shares'] = num_shares_screener
                     
@@ -8822,7 +8827,7 @@ def main():
                     # Build tab list based on what was run
                     tab_list = ["📊 Historical Financials"]
                     if run_dcf_screener:
-                        tab_list.extend(["📈 Projections", "💰 DCF Details"])
+                        tab_list.extend(["📈 Projections", "💰 FCF Working", "🎯 WACC Calculation", "🏆 DCF Summary"])
                     if run_ddm_screener:
                         tab_list.append("💸 DDM Valuation")
                     if run_rim_screener:
@@ -8892,9 +8897,83 @@ def main():
                         
                         tab_idx += 1
                         
-                        # Tab 3: DCF Details
+                        # Tab 3: FCF Working
                         with tabs[tab_idx]:
-                            st.subheader("DCF Valuation Details")
+                            st.subheader("Free Cash Flow Working")
+                            
+                            fcf_df = pd.DataFrame({
+                                'Year': [f"Year {y}" for y in projections_screener['year']],
+                                'NOPAT': projections_screener['nopat'],
+                                '(+) Depreciation': projections_screener['depreciation'],
+                                '(-) ΔWC': projections_screener['delta_wc'],
+                                '(-) CapEx': projections_screener['capex'],
+                                'FCFF': projections_screener['fcff'],
+                                'PV(FCFF)': dcf_results_screener['pv_fcffs']
+                            })
+                            numeric_cols = fcf_df.select_dtypes(include=[np.number]).columns.tolist()
+                            format_dict = {col: '{:.2f}' for col in numeric_cols}
+                            st.dataframe(fcf_df.style.format(format_dict), use_container_width=True)
+                            
+                            st.info(f"**Sum of PV(FCFF):** ₹ {dcf_results_screener['sum_pv_fcff']:.2f} Lacs")
+                        
+                        tab_idx += 1
+                        
+                        # Tab 4: WACC Calculation
+                        with tabs[tab_idx]:
+                            st.subheader("🎯 WACC Calculation & Breakdown")
+                            
+                            # WACC Components
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("#### Cost of Equity (Ke)")
+                                ke_df = pd.DataFrame({
+                                    'Component': ['Risk-Free Rate', 'Beta', 'Market Return', 'Market Risk Premium', 'Cost of Equity'],
+                                    'Value': [
+                                        f"{wacc_details['rf']:.2f}%",
+                                        f"{wacc_details['beta']:.3f}",
+                                        f"{wacc_details['rm']:.2f}%",
+                                        f"{wacc_details['rm'] - wacc_details['rf']:.2f}%",
+                                        f"{wacc_details['ke']:.2f}%"
+                                    ]
+                                })
+                                st.table(ke_df)
+                            
+                            with col2:
+                                st.markdown("#### Cost of Debt (Kd)")
+                                kd_df = pd.DataFrame({
+                                    'Component': ['Total Debt', 'Interest Expense', 'Cost of Debt (Pre-tax)', 'Tax Rate', 'Cost of Debt (After-tax)'],
+                                    'Value': [
+                                        f"₹ {wacc_details['debt']:.2f} Lacs",
+                                        f"₹ {financials_screener['interest'][0]:.2f} Lacs",
+                                        f"{wacc_details['kd']:.2f}%",
+                                        f"{tax_rate_screener:.2f}%",
+                                        f"{wacc_details['kd_after_tax']:.2f}%"
+                                    ]
+                                })
+                                st.table(kd_df)
+                            
+                            st.markdown("#### WACC Calculation")
+                            wacc_calc_df = pd.DataFrame({
+                                'Component': ['Equity', 'Debt', 'Total Capital', 'Weight of Equity', 'Weight of Debt', 'WACC'],
+                                'Value': [
+                                    f"₹ {wacc_details['equity']:.2f} Lacs",
+                                    f"₹ {wacc_details['debt']:.2f} Lacs",
+                                    f"₹ {wacc_details['equity'] + wacc_details['debt']:.2f} Lacs",
+                                    f"{wacc_details['we']*100:.2f}%",
+                                    f"{wacc_details['wd']*100:.2f}%",
+                                    f"{wacc_details['wacc']:.2f}%"
+                                ]
+                            })
+                            st.table(wacc_calc_df)
+                            
+                            st.success(f"**WACC = (We × Ke) + (Wd × Kd) = ({wacc_details['we']:.2%} × {wacc_details['ke']:.2f}%) + ({wacc_details['wd']:.2%} × {wacc_details['kd_after_tax']:.2f}%) = {wacc_details['wacc']:.2f}%**")
+                        
+                        tab_idx += 1
+                        
+                        # Tab 5: DCF Summary
+                        with tabs[tab_idx]:
+                            st.subheader("🏆 DCF Valuation Summary")
                             
                             st.markdown("### Enterprise Value Build-up")
                             ev_df = pd.DataFrame({

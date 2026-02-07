@@ -185,6 +185,8 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
     """
     Extract financial metrics from Screener Excel DataFrames
     
+    **CRITICAL: Screener data is in CRORES, we convert to LACS (multiply by 100)**
+    
     Maps Screener template items to financial metrics:
     
     Balance Sheet Items:
@@ -196,6 +198,7 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
     - Receivables
     - Inventory
     - Cash & Bank
+    - No. of Equity Shares
     
     P&L Items:
     - Sales (Revenue)
@@ -209,7 +212,8 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
     - Dividend Amount
     
     Returns:
-        dict: Financial metrics with 3 years of historical data (NEWEST FIRST)
+        dict: Financial metrics with 3 years of historical data (NEWEST FIRST) in LACS
+        Also includes 'num_shares' extracted from Balance Sheet
     """
     num_years = min(3, len(year_cols))
     last_years = year_cols[-num_years:]
@@ -230,7 +234,7 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         'tax': [],
         'nopat': [],
         'net_profit': [],  # Actual reported net profit
-        'dividends': [],  # Dividend amounts
+        'dividends': [],  # Dividend amounts in CRORES (will convert to Lacs)
         'fixed_assets': [],
         'inventory': [],
         'receivables': [],
@@ -239,15 +243,22 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         'equity': [],
         'st_debt': [],
         'lt_debt': [],
+        'num_shares': None  # Will be extracted from latest year
     }
+    
+    # Extract number of shares from latest year (FIRST in reversed list)
+    latest_year = last_years[0]
+    num_shares_raw = get_value_from_screener_df(df_bs, 'No. of Equity Shares', latest_year)
+    if num_shares_raw > 0:
+        financials['num_shares'] = int(num_shares_raw)
     
     for year_col in last_years:
         # ===== INCOME STATEMENT =====
         
-        # Revenue (Sales)
+        # Revenue (Sales) - IN CRORES
         revenue = get_value_from_screener_df(df_pl, 'Sales', year_col)
         
-        # COGS Components
+        # COGS Components - IN CRORES
         raw_material = get_value_from_screener_df(df_pl, 'Raw Material Cost', year_col)
         change_inventory = get_value_from_screener_df(df_pl, 'Change in Inventory', year_col)
         power_fuel = get_value_from_screener_df(df_pl, 'Power and Fuel', year_col)
@@ -257,33 +268,33 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         # COGS = Raw Material + Change in Inventory + Power & Fuel + Other Manufacturing
         cogs = raw_material + change_inventory + power_fuel + other_mfr
         
-        # Operating Expenses
+        # Operating Expenses - IN CRORES
         employee_cost = get_value_from_screener_df(df_pl, 'Employee Cost', year_col)
         selling_admin = get_value_from_screener_df(df_pl, 'Selling and admin', year_col)
         
         opex = employee_cost + selling_admin
         
-        # Other Income and Expenses
+        # Other Income and Expenses - IN CRORES
         other_income = get_value_from_screener_df(df_pl, 'Other Income', year_col)
         other_expenses = get_value_from_screener_df(df_pl, 'Other Expenses', year_col)
         
-        # Depreciation
+        # Depreciation - IN CRORES
         depreciation = get_value_from_screener_df(df_pl, 'Depreciation', year_col)
         
-        # Interest
+        # Interest - IN CRORES
         interest = get_value_from_screener_df(df_pl, 'Interest', year_col)
         
         # Note: Screener template doesn't have separate interest income
         # If other_income is primarily interest income, it could be used for classification
         interest_income = 0.0  # Default to 0 unless template provides it
         
-        # Tax
+        # Tax - IN CRORES
         tax = get_value_from_screener_df(df_pl, 'Tax', year_col)
         
-        # Net Profit (reported)
+        # Net Profit (reported) - IN CRORES
         net_profit = get_value_from_screener_df(df_pl, 'Net profit', year_col)
         
-        # Dividends
+        # Dividends - IN CRORES
         dividend_amount = get_value_from_screener_df(df_pl, 'Dividend Amount', year_col)
         
         # Calculate EBITDA and EBIT
@@ -296,64 +307,64 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         # NOPAT = EBIT * (1 - tax_rate)
         # Estimate tax rate from reported figures
         pbt = get_value_from_screener_df(df_pl, 'Profit before tax', year_col)
-        if pbt > 0 and tax > 0:
-            effective_tax_rate = tax / pbt
+        if pbt > 0 and abs(tax) > 0:
+            effective_tax_rate = abs(tax) / pbt
         else:
             effective_tax_rate = 0.25  # Default 25%
         
         nopat = ebit * (1 - effective_tax_rate)
         
-        # Store P&L metrics
-        financials['revenue'].append(revenue)
-        financials['cogs'].append(cogs)
-        financials['opex'].append(opex)
-        financials['ebitda'].append(ebitda)
-        financials['depreciation'].append(depreciation)
-        financials['ebit'].append(ebit)
-        financials['interest'].append(interest)
-        financials['interest_income'].append(interest_income)
-        financials['tax'].append(tax)
-        financials['nopat'].append(nopat)
-        financials['net_profit'].append(net_profit)
-        financials['dividends'].append(dividend_amount)
+        # **CONVERT FROM CRORES TO LACS (multiply by 100)**
+        financials['revenue'].append(revenue * 100)
+        financials['cogs'].append(cogs * 100)
+        financials['opex'].append(opex * 100)
+        financials['ebitda'].append(ebitda * 100)
+        financials['depreciation'].append(depreciation * 100)
+        financials['ebit'].append(ebit * 100)
+        financials['interest'].append(interest * 100)
+        financials['interest_income'].append(interest_income * 100)
+        financials['tax'].append(tax * 100)
+        financials['nopat'].append(nopat * 100)
+        financials['net_profit'].append(net_profit * 100)
+        financials['dividends'].append(dividend_amount * 100)  # Dividends also in Lacs
         
         # ===== BALANCE SHEET =====
         
-        # Fixed Assets (Net Block + Capital Work in Progress)
+        # Fixed Assets (Net Block + Capital Work in Progress) - IN CRORES
         net_block = get_value_from_screener_df(df_bs, 'Net Block', year_col)
         cwip = get_value_from_screener_df(df_bs, 'Capital Work in Progress', year_col)
         fixed_assets = net_block + cwip
         
-        # Current Assets
+        # Current Assets - IN CRORES
         inventory = get_value_from_screener_df(df_bs, 'Inventory', year_col)
         receivables = get_value_from_screener_df(df_bs, 'Receivables', year_col)
         cash = get_value_from_screener_df(df_bs, 'Cash & Bank', year_col)
         
-        # Equity (Equity Share Capital + Reserves)
+        # Equity (Equity Share Capital + Reserves) - IN CRORES
         share_capital = get_value_from_screener_df(df_bs, 'Equity Share Capital', year_col)
         reserves = get_value_from_screener_df(df_bs, 'Reserves', year_col)
         equity = share_capital + reserves
         
-        # Debt (Borrowings)
+        # Debt (Borrowings) - IN CRORES
         borrowings = get_value_from_screener_df(df_bs, 'Borrowings', year_col)
         # Screener template has only total borrowings, split as 60% LT, 40% ST
         lt_debt = borrowings * 0.6
         st_debt = borrowings * 0.4
         
-        # Payables (from Other Liabilities - rough estimate)
+        # Payables (from Other Liabilities - rough estimate) - IN CRORES
         other_liabilities = get_value_from_screener_df(df_bs, 'Other Liabilities', year_col)
         # Assume 70% of other liabilities are trade payables
         payables = other_liabilities * 0.7
         
-        # Store Balance Sheet metrics
-        financials['fixed_assets'].append(fixed_assets)
-        financials['inventory'].append(inventory)
-        financials['receivables'].append(receivables)
-        financials['payables'].append(payables)
-        financials['cash'].append(cash)
-        financials['equity'].append(equity)
-        financials['st_debt'].append(st_debt)
-        financials['lt_debt'].append(lt_debt)
+        # **CONVERT FROM CRORES TO LACS (multiply by 100)**
+        financials['fixed_assets'].append(fixed_assets * 100)
+        financials['inventory'].append(inventory * 100)
+        financials['receivables'].append(receivables * 100)
+        financials['payables'].append(payables * 100)
+        financials['cash'].append(cash * 100)
+        financials['equity'].append(equity * 100)
+        financials['st_debt'].append(st_debt * 100)
+        financials['lt_debt'].append(lt_debt * 100)
     
     return financials
 
