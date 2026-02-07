@@ -448,7 +448,7 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
     
     avg_historical_growth = np.mean(historical_growth_rates) if historical_growth_rates else growth_rate
     
-    # Use latest non-zero dividend
+    # Use latest non-zero dividend (in LACS)
     latest_dividend = next((d for d in reversed(dividends) if d > 0), 0)
     
     if latest_dividend == 0:
@@ -460,7 +460,8 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
             'total_intrinsic_value': 0
         }
     
-    dps = latest_dividend / num_shares  # Dividend per share
+    # Convert dividend from LACS to RUPEES, then divide by shares
+    dps = (latest_dividend * 100000) / num_shares  # Dividend per share in Rupees
     
     # Gordon Growth Model: P = D1 / (r - g)
     # D1 = D0 * (1 + g)
@@ -526,9 +527,9 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
     if not financials or num_shares <= 0:
         return None
     
-    # Get latest book value and net income
-    equity = financials['equity'][-1]  # Total equity (book value)
-    net_income = financials['net_profit'][-1]  # Use reported net profit
+    # Get latest book value and net income (both in LACS)
+    equity = financials['equity'][-1]  # Total equity (book value) in LACS
+    net_income = financials['net_profit'][-1]  # Use reported net profit in LACS
     
     if equity <= 0:
         return {
@@ -592,13 +593,17 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
     else:
         pv_terminal = 0
     
-    # Total intrinsic value
+    # Total intrinsic value (in LACS)
     # Value = Current Book Value + PV(Residual Incomes) + PV(Terminal Value)
     total_intrinsic_value = equity + sum(pv_residual_incomes) + pv_terminal
     
-    # Per share value
-    intrinsic_value_per_share = total_intrinsic_value / num_shares
-    book_value_per_share = equity / num_shares
+    # Convert from LACS to RUPEES for per share calculations
+    total_intrinsic_value_rupees = total_intrinsic_value * 100000
+    equity_rupees = equity * 100000
+    
+    # Per share value (in RUPEES)
+    intrinsic_value_per_share = total_intrinsic_value_rupees / num_shares
+    book_value_per_share = equity_rupees / num_shares
     
     return {
         'model': 'RIM (Residual Income Model)',
@@ -700,9 +705,18 @@ def generate_screener_valuation_excel(company_name, financials, dcf_results, ddm
     # Comparative Valuation
     if comp_val_results and comp_val_results.get('valuations'):
         ws_summary[f'A{row}'] = "Peer Multiples (Avg)"
-        avg_val = np.mean([v for v in comp_val_results['valuations'].values() if v > 0])
-        ws_summary[f'B{row}'] = avg_val
-        ws_summary[f'C{row}'] = avg_val * financials.get('num_shares', 1)
+        # Extract fair values from nested dict structure
+        fair_values = []
+        for method_key, val_data in comp_val_results['valuations'].items():
+            if isinstance(val_data, dict):
+                avg_val = val_data.get('fair_value_avg', 0)
+                if avg_val and avg_val > 0:
+                    fair_values.append(avg_val)
+        
+        if fair_values:
+            avg_val = np.mean(fair_values)
+            ws_summary[f'B{row}'] = avg_val
+            ws_summary[f'C{row}'] = avg_val * financials.get('num_shares', 1)
         row += 1
     
     # Column widths
