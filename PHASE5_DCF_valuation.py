@@ -7645,7 +7645,7 @@ def main():
                             st.write("• **Comparative Valuation (Tab 7)** - P/E, P/B multiples")
                             st.write("• **DDM (Tab 9)** - If company pays dividends")
     
-    else:  # Unlisted Mode
+    elif mode == "Unlisted Company (Excel Upload)":
         st.subheader("📄 Unlisted Company Valuation")
     
         # Template download section
