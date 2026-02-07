@@ -8956,8 +8956,11 @@ def main():
                     with tabs[tab_idx]:
                         st.subheader("Historical Financials")
                         
-                        # Add Historical Financials Chart
-                        st.plotly_chart(create_historical_financials_chart(financials_screener), use_container_width=True)
+                        # Add Historical Financials Chart with error handling
+                        try:
+                            st.plotly_chart(create_historical_financials_chart(financials_screener), use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Historical chart error: {str(e)}")
                         
                         st.markdown("---")
                         st.markdown("### Income Statement")
@@ -9000,8 +9003,11 @@ def main():
                         with tabs[tab_idx]:
                             st.subheader(f"Projected Financials ({projection_years_screener} Years)")
                             
-                            # Add Projection Chart
-                            st.plotly_chart(create_fcff_projection_chart(projections_screener), use_container_width=True)
+                            # Add Projection Chart with error handling
+                            try:
+                                st.plotly_chart(create_fcff_projection_chart(projections_screener), use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Chart error: {str(e)}")
                             
                             st.markdown("---")
                             
@@ -9048,8 +9054,11 @@ def main():
                         with tabs[tab_idx]:
                             st.subheader("🎯 WACC Calculation & Breakdown")
                             
-                            # Add WACC Breakdown Chart
-                            st.plotly_chart(create_wacc_breakdown_chart(wacc_details), use_container_width=True)
+                            # Add WACC Breakdown Chart with error handling
+                            try:
+                                st.plotly_chart(create_wacc_breakdown_chart(wacc_details), use_container_width=True)
+                            except Exception as e:
+                                st.error(f"WACC chart error: {str(e)}")
                             
                             st.markdown("---")
                             
@@ -9106,8 +9115,11 @@ def main():
                         with tabs[tab_idx]:
                             st.subheader("🏆 DCF Valuation Summary")
                             
-                            # Add Waterfall Chart
-                            st.plotly_chart(create_waterfall_chart(dcf_results_screener), use_container_width=True)
+                            # Add Waterfall Chart with error handling
+                            try:
+                                st.plotly_chart(create_waterfall_chart(dcf_results_screener), use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Waterfall chart error: {str(e)}")
                             
                             st.markdown("---")
                             
@@ -9152,11 +9164,14 @@ def main():
                             if len(g_range) == 0:
                                 g_range = np.array([terminal_growth_screener])
                             
-                            # Add Sensitivity Heatmap
-                            st.plotly_chart(
-                                create_sensitivity_heatmap(projections_screener, wacc_range, g_range, num_shares_screener),
-                                use_container_width=True
-                            )
+                            # Add Sensitivity Heatmap with error handling
+                            try:
+                                st.plotly_chart(
+                                    create_sensitivity_heatmap(projections_screener, wacc_range, g_range, num_shares_screener),
+                                    use_container_width=True
+                                )
+                            except Exception as e:
+                                st.error(f"Sensitivity chart error: {str(e)}")
                             
                             st.info("💡 **How to Read:** Each cell shows the fair value per share for different combinations of WACC and terminal growth rate. Darker green = higher valuation, darker red = lower valuation.")
                         

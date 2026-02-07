@@ -359,6 +359,16 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         # Net Profit (reported) - IN CRORES
         net_profit = get_value_from_screener_df(df_pl, 'Net profit', year_col)
         
+        # Profit Before Tax - IN CRORES
+        pbt = get_value_from_screener_df(df_pl, 'Profit before tax', year_col)
+        
+        # **CRITICAL FIX**: If Tax is not found or is zero, CALCULATE it from PBT and Net Profit
+        if tax == 0 or abs(tax) < 0.01:
+            if pbt > 0 and net_profit > 0:
+                tax = pbt - net_profit  # Tax = PBT - PAT
+                if tax < 0:
+                    tax = 0  # Handle cases where net profit > PBT due to extraordinary items
+        
         # Dividends - IN CRORES
         dividend_amount = get_value_from_screener_df(df_pl, 'Dividend Amount', year_col)
         
@@ -371,7 +381,6 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         
         # **CRITICAL FIX**: NOPAT calculation using ACTUAL TAX, not PBT
         # Calculate effective tax rate from actual tax paid
-        pbt = get_value_from_screener_df(df_pl, 'Profit before tax', year_col)
         if pbt > 0 and abs(tax) > 0:
             effective_tax_rate = abs(tax) / pbt
         else:
