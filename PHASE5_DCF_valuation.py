@@ -8463,6 +8463,24 @@ def main():
         
         with col1:
             company_name_screener = st.text_input("Company Name:", key='screener_company_name')
+            
+            # NEW: Ticker input for Yahoo Finance data (current price + beta)
+            col_ticker1, col_ticker2 = st.columns([3, 1])
+            with col_ticker1:
+                ticker_symbol_screener = st.text_input(
+                    "Stock Ticker Symbol (for current price & beta):",
+                    placeholder="e.g., RELIANCE, TCS, HDFCBANK",
+                    key='screener_ticker',
+                    help="Enter stock ticker to fetch current market price and beta from Yahoo Finance"
+                )
+            with col_ticker2:
+                exchange_screener = st.selectbox(
+                    "Exchange",
+                    ["NS", "BO"],
+                    key='screener_exchange',
+                    help="NS=NSE, BO=BSE"
+                )
+            
             excel_file_screener = st.file_uploader(
                 "Upload Screener Excel Template", 
                 type=['xlsx', 'xls'],
@@ -8679,6 +8697,33 @@ def main():
                     display_screener_financial_summary(financials_screener)
                     
                     # ================================
+                    # FETCH TICKER DATA (Current Price & Beta)
+                    # ================================
+                    st.markdown("---")
+                    st.subheader("📈 Market Data from Yahoo Finance")
+                    
+                    current_price_screener = 0.0
+                    beta_screener = 1.0
+                    
+                    if ticker_symbol_screener and ticker_symbol_screener.strip():
+                        ticker_data = fetch_ticker_data_for_screener(ticker_symbol_screener, exchange_screener)
+                        
+                        if ticker_data and not ticker_data.get('error'):
+                            current_price_screener = ticker_data['current_price']
+                            beta_screener = ticker_data['beta']
+                            
+                            col_price1, col_price2 = st.columns(2)
+                            with col_price1:
+                                st.metric("📊 Current Market Price", f"₹{current_price_screener:.2f}")
+                            with col_price2:
+                                st.metric("📊 Beta (β)", f"{beta_screener:.3f}")
+                        else:
+                            st.warning(f"⚠️ Could not fetch ticker data: {ticker_data.get('error', 'Unknown error')}")
+                            st.info("💡 Continuing with default beta (1.0) for WACC calculation")
+                    else:
+                        st.info("💡 No ticker provided - using default beta (1.0) for WACC calculation. Current price comparison will not be available.")
+                    
+                    # ================================
                     # BUSINESS MODEL CLASSIFICATION
                     # ================================
                     st.markdown("---")
@@ -8824,10 +8869,79 @@ def main():
                     # ================================
                     st.markdown("---")
                     
+                    # ================================
+                    # CURRENT PRICE VS FAIR VALUES COMPARISON
+                    # ================================
+                    if current_price_screener > 0:
+                        st.subheader("💰 Current Price vs Fair Values")
+                        
+                        # Collect all fair values
+                        fair_values_dict = {}
+                        
+                        if dcf_results_screener and dcf_results_screener.get('fair_value_per_share', 0) > 0:
+                            fair_values_dict['DCF (FCFF)'] = dcf_results_screener['fair_value_per_share']
+                        
+                        if ddm_results_screener and ddm_results_screener.get('status') == 'Success':
+                            fair_values_dict['DDM (Gordon)'] = ddm_results_screener.get('value_per_share', 0)
+                        
+                        if rim_results_screener and rim_results_screener.get('status') == 'Success':
+                            fair_values_dict['RIM (Residual Income)'] = rim_results_screener.get('value_per_share', 0)
+                        
+                        if comp_val_results_screener and comp_val_results_screener.get('valuations'):
+                            valuations = comp_val_results_screener['valuations']
+                            all_avg_values = [v.get('fair_value_avg', 0) for v in valuations.values()]
+                            if all_avg_values:
+                                fair_values_dict['Comparative Valuation (Avg)'] = np.mean(all_avg_values)
+                        
+                        if fair_values_dict:
+                            # Create comparison DataFrame
+                            comparison_data = []
+                            for method, fair_value in fair_values_dict.items():
+                                upside = ((fair_value - current_price_screener) / current_price_screener * 100) if current_price_screener > 0 else 0
+                                comparison_data.append({
+                                    'Valuation Method': method,
+                                    'Fair Value (₹)': fair_value,
+                                    'Current Price (₹)': current_price_screener,
+                                    'Upside/Downside (%)': upside
+                                })
+                            
+                            comparison_df = pd.DataFrame(comparison_data)
+                            
+                            # Display comparison table
+                            st.dataframe(
+                                comparison_df.style.format({
+                                    'Fair Value (₹)': '₹{:.2f}',
+                                    'Current Price (₹)': '₹{:.2f}',
+                                    'Upside/Downside (%)': '{:+.1f}%'
+                                }).applymap(
+                                    lambda x: 'background-color: #d4edda' if isinstance(x, (int, float)) and x > 0 else ('background-color: #f8d7da' if isinstance(x, (int, float)) and x < 0 else ''),
+                                    subset=['Upside/Downside (%)']
+                                ),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+                            
+                            # Calculate and display average
+                            avg_fair_value = np.mean(list(fair_values_dict.values()))
+                            avg_upside = ((avg_fair_value - current_price_screener) / current_price_screener * 100)
+                            
+                            col_avg1, col_avg2, col_avg3 = st.columns(3)
+                            with col_avg1:
+                                st.metric("Current Market Price", f"₹{current_price_screener:.2f}")
+                            with col_avg2:
+                                st.metric("Average Fair Value (All Methods)", f"₹{avg_fair_value:.2f}")
+                            with col_avg3:
+                                st.metric("Average Upside/Downside", f"{avg_upside:+.1f}%", 
+                                         delta=f"₹{avg_fair_value - current_price_screener:+.2f}")
+                        else:
+                            st.info("No valid fair values calculated yet")
+                        
+                        st.markdown("---")
+                    
                     # Build tab list based on what was run
                     tab_list = ["📊 Historical Financials"]
                     if run_dcf_screener:
-                        tab_list.extend(["📈 Projections", "💰 FCF Working", "🎯 WACC Calculation", "🏆 DCF Summary"])
+                        tab_list.extend(["📈 Projections", "💰 FCF Working", "🎯 WACC Calculation", "🏆 DCF Summary", "📉 Sensitivity Analysis"])
                     if run_ddm_screener:
                         tab_list.append("💸 DDM Valuation")
                     if run_rim_screener:
@@ -8841,6 +8955,12 @@ def main():
                     # Tab 1: Historical Financials
                     with tabs[tab_idx]:
                         st.subheader("Historical Financials")
+                        
+                        # Add Historical Financials Chart
+                        st.plotly_chart(create_historical_financials_chart(financials_screener), use_container_width=True)
+                        
+                        st.markdown("---")
+                        st.markdown("### Income Statement")
                         
                         hist_df = pd.DataFrame({
                             'Year': [str(y) for y in financials_screener['years']],
@@ -8857,6 +8977,7 @@ def main():
                         format_dict = {col: '{:.2f}' for col in numeric_cols}
                         st.dataframe(hist_df.style.format(format_dict), use_container_width=True)
                         
+                        st.markdown("---")
                         st.subheader("Balance Sheet Metrics")
                         bs_df = pd.DataFrame({
                             'Year': [str(y) for y in financials_screener['years']],
@@ -8878,6 +8999,11 @@ def main():
                     if run_dcf_screener:
                         with tabs[tab_idx]:
                             st.subheader(f"Projected Financials ({projection_years_screener} Years)")
+                            
+                            # Add Projection Chart
+                            st.plotly_chart(create_fcff_projection_chart(projections_screener), use_container_width=True)
+                            
+                            st.markdown("---")
                             
                             proj_df = pd.DataFrame({
                                 'Year': [f"Year {y}" for y in projections_screener['year']],
@@ -8922,6 +9048,11 @@ def main():
                         with tabs[tab_idx]:
                             st.subheader("🎯 WACC Calculation & Breakdown")
                             
+                            # Add WACC Breakdown Chart
+                            st.plotly_chart(create_wacc_breakdown_chart(wacc_details), use_container_width=True)
+                            
+                            st.markdown("---")
+                            
                             # WACC Components
                             col1, col2 = st.columns(2)
                             
@@ -8960,20 +9091,25 @@ def main():
                                     f"₹ {wacc_details['equity']:.2f} Lacs",
                                     f"₹ {wacc_details['debt']:.2f} Lacs",
                                     f"₹ {wacc_details['equity'] + wacc_details['debt']:.2f} Lacs",
-                                    f"{wacc_details['we']*100:.2f}%",
-                                    f"{wacc_details['wd']*100:.2f}%",
+                                    f"{wacc_details['we']:.2f}%",
+                                    f"{wacc_details['wd']:.2f}%",
                                     f"{wacc_details['wacc']:.2f}%"
                                 ]
                             })
                             st.table(wacc_calc_df)
                             
-                            st.success(f"**WACC = (We × Ke) + (Wd × Kd) = ({wacc_details['we']:.2%} × {wacc_details['ke']:.2f}%) + ({wacc_details['wd']:.2%} × {wacc_details['kd_after_tax']:.2f}%) = {wacc_details['wacc']:.2f}%**")
+                            st.success(f"**WACC = (We × Ke) + (Wd × Kd) = ({wacc_details['we']:.2f}% × {wacc_details['ke']:.2f}%) + ({wacc_details['wd']:.2f}% × {wacc_details['kd_after_tax']:.2f}%) = {wacc_details['wacc']:.2f}%**")
                         
                         tab_idx += 1
                         
                         # Tab 5: DCF Summary
                         with tabs[tab_idx]:
                             st.subheader("🏆 DCF Valuation Summary")
+                            
+                            # Add Waterfall Chart
+                            st.plotly_chart(create_waterfall_chart(dcf_results_screener), use_container_width=True)
+                            
+                            st.markdown("---")
                             
                             st.markdown("### Enterprise Value Build-up")
                             ev_df = pd.DataFrame({
@@ -8986,6 +9122,7 @@ def main():
                             })
                             st.dataframe(ev_df.style.format({'Value (₹ Lacs)': '{:.2f}'}), use_container_width=True)
                             
+                            st.markdown("---")
                             st.markdown("### Equity Value Calculation")
                             equity_df = pd.DataFrame({
                                 'Component': ['Enterprise Value', '(-) Total Debt', '(+) Cash', 'Equity Value', 'Number of Shares', 'Fair Value per Share'],
@@ -9001,6 +9138,27 @@ def main():
                             st.table(equity_df)
                             
                             st.info(f"**Terminal Value % of EV:** {dcf_results_screener['tv_percentage']:.1f}%")
+                        
+                        tab_idx += 1
+                        
+                        # Tab 6: Sensitivity Analysis (NEW)
+                        with tabs[tab_idx]:
+                            st.subheader("📉 Sensitivity Analysis")
+                            
+                            # Create WACC and growth ranges
+                            wacc_range = np.arange(max(1.0, wacc_details['wacc'] - 3), wacc_details['wacc'] + 3.5, 0.5)
+                            g_range = np.arange(max(1.0, terminal_growth_screener - 2), min(terminal_growth_screener + 3, wacc_details['wacc'] - 1), 0.5)
+                            
+                            if len(g_range) == 0:
+                                g_range = np.array([terminal_growth_screener])
+                            
+                            # Add Sensitivity Heatmap
+                            st.plotly_chart(
+                                create_sensitivity_heatmap(projections_screener, wacc_range, g_range, num_shares_screener),
+                                use_container_width=True
+                            )
+                            
+                            st.info("💡 **How to Read:** Each cell shows the fair value per share for different combinations of WACC and terminal growth rate. Darker green = higher valuation, darker red = lower valuation.")
                         
                         tab_idx += 1
                     

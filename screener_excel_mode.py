@@ -10,13 +10,14 @@ Features:
 - Full DCF Valuation
 - DDM (Dividend Discount Model) 
 - RIM (Residual Income Model)
-- Peer Comparison Dashboard
 - Comparative Valuation
 - Excel Download Functionality
-- All unlisted mode features adapted for Screener template format
+- Ticker Input for Yahoo Finance (current price + beta)
+- Current price vs fair values comparison
+- Charts and visualizations from Listed mode
 
 Author: SheshUltimate Team
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import pandas as pd
@@ -27,6 +28,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl import Workbook
 from io import BytesIO
+import yfinance as yf
 
 
 # ================================
@@ -178,6 +180,69 @@ def detect_screener_year_columns(df):
 
 
 # ================================
+# YAHOO FINANCE INTEGRATION
+# ================================
+
+def fetch_ticker_data_for_screener(ticker_symbol, exchange='NS'):
+    """
+    Fetch current price and beta from Yahoo Finance for Screener mode
+    
+    Args:
+        ticker_symbol: Stock ticker (e.g., 'RELIANCE', 'TCS')
+        exchange: Exchange suffix ('NS' for NSE, 'BO' for BSE)
+    
+    Returns:
+        dict: {'current_price': float, 'beta': float, 'ticker': str}
+    """
+    if not ticker_symbol or not ticker_symbol.strip():
+        return {'current_price': 0.0, 'beta': 1.0, 'ticker': None, 'error': 'No ticker provided'}
+    
+    try:
+        # Add exchange suffix if not present
+        ticker_clean = ticker_symbol.strip().upper()
+        if '.NS' not in ticker_clean and '.BO' not in ticker_clean:
+            full_ticker = f"{ticker_clean}.{exchange}"
+        else:
+            full_ticker = ticker_clean
+        
+        st.info(f"🔍 Fetching data for {full_ticker} from Yahoo Finance...")
+        
+        # Fetch ticker data
+        ticker = yf.Ticker(full_ticker)
+        info = ticker.info
+        
+        # Get current price
+        current_price = info.get('currentPrice', 0.0)
+        if current_price == 0.0:
+            current_price = info.get('regularMarketPrice', 0.0)
+        if current_price == 0.0:
+            current_price = info.get('previousClose', 0.0)
+        
+        # Get beta
+        beta = info.get('beta', 1.0)
+        if beta is None or beta <= 0:
+            beta = 1.0
+        
+        st.success(f"✅ Current Price: ₹{current_price:.2f} | Beta: {beta:.3f}")
+        
+        return {
+            'current_price': current_price,
+            'beta': beta,
+            'ticker': full_ticker,
+            'error': None
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Error fetching ticker data: {str(e)}")
+        return {
+            'current_price': 0.0,
+            'beta': 1.0,
+            'ticker': ticker_symbol,
+            'error': str(e)
+        }
+
+
+# ================================
 # SCREENER FINANCIAL EXTRACTION
 # ================================
 
@@ -207,7 +272,7 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
     - Other Income, Other Expenses
     - Depreciation
     - Interest
-    - Tax
+    - Tax (ACTUAL TAX PAID, not PBT)
     - Net profit
     - Dividend Amount
     
@@ -288,7 +353,7 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         # If other_income is primarily interest income, it could be used for classification
         interest_income = 0.0  # Default to 0 unless template provides it
         
-        # Tax - IN CRORES
+        # **CRITICAL FIX**: Tax - Extract ACTUAL TAX PAID (not PBT) - IN CRORES
         tax = get_value_from_screener_df(df_pl, 'Tax', year_col)
         
         # Net Profit (reported) - IN CRORES
@@ -304,8 +369,8 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         # EBIT = EBITDA - Depreciation
         ebit = ebitda - depreciation
         
-        # NOPAT = EBIT * (1 - tax_rate)
-        # Estimate tax rate from reported figures
+        # **CRITICAL FIX**: NOPAT calculation using ACTUAL TAX, not PBT
+        # Calculate effective tax rate from actual tax paid
         pbt = get_value_from_screener_df(df_pl, 'Profit before tax', year_col)
         if pbt > 0 and abs(tax) > 0:
             effective_tax_rate = abs(tax) / pbt
@@ -323,7 +388,7 @@ def extract_screener_financials(df_bs, df_pl, year_cols):
         financials['ebit'].append(ebit * 100)
         financials['interest'].append(interest * 100)
         financials['interest_income'].append(interest_income * 100)
-        financials['tax'].append(tax * 100)
+        financials['tax'].append(tax * 100)  # Store actual tax paid in Lacs
         financials['nopat'].append(nopat * 100)
         financials['net_profit'].append(net_profit * 100)
         financials['dividends'].append(dividend_amount * 100)  # Dividends also in Lacs
@@ -435,7 +500,7 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
             'model': 'DDM',
             'status': 'Insufficient Data',
             'message': 'Need at least 2 years of dividend history',
-            'intrinsic_value_per_share': 0,
+            'value_per_share': 0,
             'total_intrinsic_value': 0
         }
     
@@ -456,7 +521,7 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
             'model': 'DDM',
             'status': 'No Recent Dividend',
             'message': 'No dividend paid in recent years',
-            'intrinsic_value_per_share': 0,
+            'value_per_share': 0,
             'total_intrinsic_value': 0
         }
     
@@ -470,7 +535,7 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
             'model': 'DDM (Gordon Growth Model)',
             'status': 'Invalid',
             'message': f'Required return ({required_return*100:.1f}%) must be greater than growth rate ({avg_historical_growth*100:.1f}%)',
-            'intrinsic_value_per_share': 0,
+            'value_per_share': 0,
             'total_intrinsic_value': 0,
             'latest_dps': dps,
             'historical_growth_rate': avg_historical_growth
@@ -495,7 +560,7 @@ def calculate_screener_ddm_valuation(financials, num_shares, required_return=0.1
         'assumed_growth_rate': avg_historical_growth,
         'required_return': required_return,
         'expected_next_dividend': d1,
-        'intrinsic_value_per_share': intrinsic_value_per_share,
+        'value_per_share': intrinsic_value_per_share,
         'total_intrinsic_value': total_intrinsic_value,
         'dividend_history': dividends,
         'years': years
@@ -528,15 +593,15 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
         return None
     
     # Get latest book value and net income (both in LACS)
-    equity = financials['equity'][-1]  # Total equity (book value) in LACS
-    net_income = financials['net_profit'][-1]  # Use reported net profit in LACS
+    equity = financials['equity'][0]  # Total equity (book value) in LACS - index 0 is NEWEST
+    net_income = financials['net_profit'][0]  # Use reported net profit in LACS
     
     if equity <= 0:
         return {
             'model': 'RIM',
             'status': 'Invalid',
             'message': 'Book value must be positive',
-            'intrinsic_value_per_share': 0,
+            'value_per_share': 0,
             'total_intrinsic_value': 0
         }
     
@@ -599,19 +664,13 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
     
     # Convert from LACS to RUPEES for per share calculations
     total_intrinsic_value_rupees = total_intrinsic_value * 100000
-    equity_rupees = equity * 100000
-    
-    # Per share value (in RUPEES)
     intrinsic_value_per_share = total_intrinsic_value_rupees / num_shares
-    book_value_per_share = equity_rupees / num_shares
     
     return {
         'model': 'RIM (Residual Income Model)',
         'status': 'Success',
-        'current_book_value': equity,
-        'book_value_per_share': book_value_per_share,
-        'current_net_income': net_income,
-        'num_shares': num_shares,
+        'book_value': equity,
+        'net_income': net_income,
         'avg_roe': avg_roe,
         'avg_earnings_growth': avg_earnings_growth,
         'required_return': required_return,
@@ -619,31 +678,29 @@ def calculate_screener_rim_valuation(financials, num_shares, required_return=0.1
         'terminal_growth': terminal_growth,
         'residual_incomes': residual_incomes,
         'pv_residual_incomes': pv_residual_incomes,
-        'pv_terminal_value': pv_terminal,
-        'intrinsic_value_per_share': intrinsic_value_per_share,
+        'pv_terminal': pv_terminal,
         'total_intrinsic_value': total_intrinsic_value,
-        'projected_book_values': projected_book_values,
-        'projected_earnings': projected_earnings
+        'value_per_share': intrinsic_value_per_share,
+        'num_shares': num_shares
     }
 
 
 # ================================
-# SCREENER EXCEL DOWNLOAD GENERATOR
+# EXCEL GENERATION FOR SCREENER MODE
 # ================================
 
-def generate_screener_valuation_excel(company_name, financials, dcf_results, ddm_results=None, rim_results=None, 
-                                      comp_val_results=None, peer_comparison=None):
+def generate_screener_valuation_excel(company_name, financials, dcf_results, ddm_results, rim_results, comp_val_results, peer_comparison):
     """
-    Generate comprehensive Excel report for Screener mode valuations
+    Generate comprehensive Excel report for Screener mode valuation
     
-    Creates an Excel workbook with multiple sheets:
-    1. Summary - Key valuation metrics
-    2. Historical Financials - 3 years of historical data
-    3. DCF Valuation - Detailed DCF model
-    4. DDM Valuation - Dividend Discount Model (if applicable)
-    5. RIM Valuation - Residual Income Model
-    6. Comparative Valuation - Peer multiples
-    7. Peer Comparison - Peer analysis dashboard
+    Args:
+        company_name: Company name
+        financials: Historical financial data dict
+        dcf_results: DCF valuation results dict
+        ddm_results: DDM valuation results dict
+        rim_results: RIM valuation results dict
+        comp_val_results: Comparative valuation results dict
+        peer_comparison: Peer comparison data (not used in Screener mode)
     
     Returns:
         BytesIO: Excel file buffer
@@ -655,10 +712,10 @@ def generate_screener_valuation_excel(company_name, financials, dcf_results, ddm
         wb.remove(wb['Sheet'])
     
     # Define styles
-    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    subheader_fill = PatternFill(start_color="B4C7E7", end_color="B4C7E7", fill_type="solid")
-    subheader_font = Font(bold=True, size=10)
+    header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
+    header_font = Font(color='FFFFFF', bold=True, size=12)
+    subheader_fill = PatternFill(start_color='DCE6F1', end_color='DCE6F1', fill_type='solid')
+    subheader_font = Font(bold=True, size=11)
     border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
@@ -666,82 +723,88 @@ def generate_screener_valuation_excel(company_name, financials, dcf_results, ddm
         bottom=Side(style='thin')
     )
     
-    # ===== SHEET 1: SUMMARY =====
-    ws_summary = wb.create_sheet("Summary", 0)
-    ws_summary['A1'] = f"{company_name} - Valuation Summary"
+    # ===== SHEET 1: Summary =====
+    ws_summary = wb.create_sheet('Summary')
+    
+    ws_summary['A1'] = f'{company_name} - Valuation Summary'
     ws_summary['A1'].font = Font(bold=True, size=14)
+    ws_summary.merge_cells('A1:D1')
     
     row = 3
-    ws_summary[f'A{row}'] = "Valuation Method"
-    ws_summary[f'B{row}'] = "Intrinsic Value per Share"
-    ws_summary[f'C{row}'] = "Total Intrinsic Value"
-    for col in ['A', 'B', 'C']:
-        ws_summary[f'{col}{row}'].fill = header_fill
-        ws_summary[f'{col}{row}'].font = header_font
+    ws_summary[f'A{row}'] = 'Valuation Method'
+    ws_summary[f'B{row}'] = 'Fair Value per Share (₹)'
+    ws_summary[f'C{row}'] = 'Status'
+    ws_summary[f'A{row}'].fill = header_fill
+    ws_summary[f'B{row}'].fill = header_fill
+    ws_summary[f'C{row}'].fill = header_fill
+    ws_summary[f'A{row}'].font = header_font
+    ws_summary[f'B{row}'].font = header_font
+    ws_summary[f'C{row}'].font = header_font
     
     row += 1
     
     # DCF
     if dcf_results:
-        ws_summary[f'A{row}'] = "DCF (FCFF)"
-        ws_summary[f'B{row}'] = dcf_results.get('intrinsic_value_per_share', 0)
-        ws_summary[f'C{row}'] = dcf_results.get('enterprise_value', 0)
+        ws_summary[f'A{row}'] = 'DCF (FCFF)'
+        ws_summary[f'B{row}'] = dcf_results.get('fair_value_per_share', 0)
+        ws_summary[f'B{row}'].number_format = '₹#,##0.00'
+        ws_summary[f'C{row}'] = 'Complete'
         row += 1
     
     # DDM
     if ddm_results and ddm_results.get('status') == 'Success':
-        ws_summary[f'A{row}'] = "DDM (Dividend Discount)"
-        ws_summary[f'B{row}'] = ddm_results.get('intrinsic_value_per_share', 0)
-        ws_summary[f'C{row}'] = ddm_results.get('total_intrinsic_value', 0)
+        ws_summary[f'A{row}'] = 'DDM (Gordon Growth)'
+        ws_summary[f'B{row}'] = ddm_results.get('value_per_share', 0)
+        ws_summary[f'B{row}'].number_format = '₹#,##0.00'
+        ws_summary[f'C{row}'] = ddm_results.get('status', '')
         row += 1
     
     # RIM
     if rim_results and rim_results.get('status') == 'Success':
-        ws_summary[f'A{row}'] = "RIM (Residual Income)"
-        ws_summary[f'B{row}'] = rim_results.get('intrinsic_value_per_share', 0)
-        ws_summary[f'C{row}'] = rim_results.get('total_intrinsic_value', 0)
+        ws_summary[f'A{row}'] = 'RIM (Residual Income)'
+        ws_summary[f'B{row}'] = rim_results.get('value_per_share', 0)
+        ws_summary[f'B{row}'].number_format = '₹#,##0.00'
+        ws_summary[f'C{row}'] = rim_results.get('status', '')
         row += 1
     
     # Comparative Valuation
-    if comp_val_results and comp_val_results.get('valuations'):
-        ws_summary[f'A{row}'] = "Peer Multiples (Avg)"
-        # Extract fair values from nested dict structure
-        fair_values = []
-        for method_key, val_data in comp_val_results['valuations'].items():
-            if isinstance(val_data, dict):
-                avg_val = val_data.get('fair_value_avg', 0)
-                if avg_val and avg_val > 0:
-                    fair_values.append(avg_val)
-        
-        if fair_values:
-            avg_val = np.mean(fair_values)
-            ws_summary[f'B{row}'] = avg_val
-            ws_summary[f'C{row}'] = avg_val * financials.get('num_shares', 1)
-        row += 1
+    if comp_val_results:
+        # Calculate average of all comparative methods
+        valuations = comp_val_results.get('valuations', {})
+        if valuations:
+            all_avg_values = [v.get('fair_value_avg', 0) for v in valuations.values()]
+            avg_comp_value = np.mean(all_avg_values) if all_avg_values else 0
+            
+            ws_summary[f'A{row}'] = 'Comparative Valuation (Avg)'
+            ws_summary[f'B{row}'] = avg_comp_value
+            ws_summary[f'B{row}'].number_format = '₹#,##0.00'
+            ws_summary[f'C{row}'] = 'Complete'
+            row += 1
     
-    # Column widths
-    ws_summary.column_dimensions['A'].width = 25
+    # Auto-fit columns
+    ws_summary.column_dimensions['A'].width = 30
     ws_summary.column_dimensions['B'].width = 25
-    ws_summary.column_dimensions['C'].width = 25
+    ws_summary.column_dimensions['C'].width = 15
     
-    # ===== SHEET 2: HISTORICAL FINANCIALS =====
-    ws_hist = wb.create_sheet("Historical Financials", 1)
-    ws_hist['A1'] = "Historical Financial Data (in Crores)"
+    # ===== SHEET 2: Historical Financials =====
+    ws_hist = wb.create_sheet('Historical Financials')
+    
+    ws_hist['A1'] = 'Historical Financial Data (All values in ₹ Lacs)'
     ws_hist['A1'].font = Font(bold=True, size=12)
+    ws_hist.merge_cells('A1:E1')
     
     row = 3
-    # Headers
-    ws_hist['A3'] = "Metric"
-    years = financials.get('years', [])
-    for i, year in enumerate(years, 1):
-        col_letter = chr(65 + i)  # B, C, D...
-        ws_hist[f'{col_letter}3'] = year.replace('_', '')
-        ws_hist[f'{col_letter}3'].fill = header_fill
-        ws_hist[f'{col_letter}3'].font = header_font
+    ws_hist[f'A{row}'] = 'Metric'
+    for i, year in enumerate(financials['years']):
+        ws_hist[f'{chr(66+i)}{row}'] = str(year)
+        ws_hist[f'{chr(66+i)}{row}'].fill = header_fill
+        ws_hist[f'{chr(66+i)}{row}'].font = header_font
+    ws_hist[f'A{row}'].fill = header_fill
+    ws_hist[f'A{row}'].font = header_font
     
-    # P&L Section
-    row = 4
-    pl_metrics = [
+    # Income Statement
+    row += 1
+    metrics = [
         ('Revenue', 'revenue'),
         ('COGS', 'cogs'),
         ('Operating Expenses', 'opex'),
@@ -750,24 +813,25 @@ def generate_screener_valuation_excel(company_name, financials, dcf_results, ddm
         ('EBIT', 'ebit'),
         ('Interest', 'interest'),
         ('Tax', 'tax'),
-        ('Net Profit', 'net_profit'),
         ('NOPAT', 'nopat'),
-        ('Dividends', 'dividends'),
+        ('Net Profit', 'net_profit')
     ]
     
-    for metric_name, metric_key in pl_metrics:
-        ws_hist[f'A{row}'] = metric_name
-        for i, year in enumerate(years, 1):
-            col_letter = chr(65 + i)
-            value = financials[metric_key][i-1] if i <= len(financials[metric_key]) else 0
-            ws_hist[f'{col_letter}{row}'] = value
+    for label, key in metrics:
+        ws_hist[f'A{row}'] = label
+        for i, val in enumerate(financials.get(key, [])):
+            ws_hist[f'{chr(66+i)}{row}'] = val
+            ws_hist[f'{chr(66+i)}{row}'].number_format = '#,##0.00'
         row += 1
     
+    # Balance Sheet
     row += 1
-    ws_hist[f'A{row}'] = "BALANCE SHEET"
-    ws_hist[f'A{row}'].font = Font(bold=True)
-    row += 1
+    ws_hist[f'A{row}'] = 'Balance Sheet'
+    ws_hist[f'A{row}'].fill = subheader_fill
+    ws_hist[f'A{row}'].font = subheader_font
+    ws_hist.merge_cells(f'A{row}:E{row}')
     
+    row += 1
     bs_metrics = [
         ('Fixed Assets', 'fixed_assets'),
         ('Inventory', 'inventory'),
@@ -775,272 +839,213 @@ def generate_screener_valuation_excel(company_name, financials, dcf_results, ddm
         ('Payables', 'payables'),
         ('Cash', 'cash'),
         ('Equity', 'equity'),
-        ('Short-term Debt', 'st_debt'),
-        ('Long-term Debt', 'lt_debt'),
+        ('ST Debt', 'st_debt'),
+        ('LT Debt', 'lt_debt')
     ]
     
-    for metric_name, metric_key in bs_metrics:
-        ws_hist[f'A{row}'] = metric_name
-        for i, year in enumerate(years, 1):
-            col_letter = chr(65 + i)
-            value = financials[metric_key][i-1] if i <= len(financials[metric_key]) else 0
-            ws_hist[f'{col_letter}{row}'] = value
+    for label, key in bs_metrics:
+        ws_hist[f'A{row}'] = label
+        for i, val in enumerate(financials.get(key, [])):
+            ws_hist[f'{chr(66+i)}{row}'] = val
+            ws_hist[f'{chr(66+i)}{row}'].number_format = '#,##0.00'
         row += 1
     
     ws_hist.column_dimensions['A'].width = 25
+    for i in range(len(financials['years'])):
+        ws_hist.column_dimensions[chr(66+i)].width = 15
     
-    # ===== SHEET 3: DCF VALUATION =====
+    # ===== SHEET 3: DCF Results =====
     if dcf_results:
-        ws_dcf = wb.create_sheet("DCF Valuation", 2)
-        ws_dcf['A1'] = "DCF Valuation Model"
+        ws_dcf = wb.create_sheet('DCF Valuation')
+        
+        ws_dcf['A1'] = 'DCF (FCFF) Valuation Results'
         ws_dcf['A1'].font = Font(bold=True, size=12)
+        ws_dcf.merge_cells('A1:D1')
         
         row = 3
-        ws_dcf[f'A{row}'] = "WACC Calculation"
-        ws_dcf[f'A{row}'].font = Font(bold=True)
-        row += 1
+        ws_dcf[f'A{row}'] = 'Metric'
+        ws_dcf[f'B{row}'] = 'Value'
+        ws_dcf[f'A{row}'].fill = header_fill
+        ws_dcf[f'B{row}'].fill = header_fill
+        ws_dcf[f'A{row}'].font = header_font
+        ws_dcf[f'B{row}'].font = header_font
         
-        wacc_items = [
-            ('Cost of Equity', dcf_results.get('cost_of_equity', 0)),
-            ('Cost of Debt', dcf_results.get('cost_of_debt', 0)),
-            ('Tax Rate', dcf_results.get('tax_rate', 0)),
-            ('Weight of Equity', dcf_results.get('weight_equity', 0)),
-            ('Weight of Debt', dcf_results.get('weight_debt', 0)),
-            ('WACC', dcf_results.get('wacc', 0)),
+        row += 1
+        dcf_metrics = [
+            ('Enterprise Value', dcf_results.get('enterprise_value', 0), '₹#,##0.00 Lacs'),
+            ('Total Debt', dcf_results.get('total_debt', 0), '₹#,##0.00 Lacs'),
+            ('Cash & Equivalents', dcf_results.get('cash', 0), '₹#,##0.00 Lacs'),
+            ('Equity Value', dcf_results.get('equity_value', 0), '₹#,##0.00 Lacs'),
+            ('Number of Shares', dcf_results.get('shares', financials.get('num_shares', 0)), '#,##0'),
+            ('Fair Value per Share', dcf_results.get('fair_value_per_share', 0), '₹#,##0.00'),
+            ('WACC', dcf_results.get('wacc', 0), '0.00%'),
+            ('Terminal Value %', dcf_results.get('tv_percentage', 0), '0.0%')
         ]
         
-        for item_name, item_value in wacc_items:
-            ws_dcf[f'A{row}'] = item_name
-            ws_dcf[f'B{row}'] = item_value
-            row += 1
-        
-        row += 1
-        ws_dcf[f'A{row}'] = "Valuation Results"
-        ws_dcf[f'A{row}'].font = Font(bold=True)
-        row += 1
-        
-        val_items = [
-            ('Enterprise Value', dcf_results.get('enterprise_value', 0)),
-            ('Less: Net Debt', dcf_results.get('net_debt', 0)),
-            ('Equity Value', dcf_results.get('equity_value', 0)),
-            ('Number of Shares', dcf_results.get('num_shares', 0)),
-            ('Intrinsic Value per Share', dcf_results.get('intrinsic_value_per_share', 0)),
-        ]
-        
-        for item_name, item_value in val_items:
-            ws_dcf[f'A{row}'] = item_name
-            ws_dcf[f'B{row}'] = item_value
+        for label, value, fmt in dcf_metrics:
+            ws_dcf[f'A{row}'] = label
+            ws_dcf[f'B{row}'] = value
+            ws_dcf[f'B{row}'].number_format = fmt
             row += 1
         
         ws_dcf.column_dimensions['A'].width = 30
         ws_dcf.column_dimensions['B'].width = 20
     
-    # ===== SHEET 4: DDM VALUATION =====
+    # ===== SHEET 4: DDM Results =====
     if ddm_results and ddm_results.get('status') == 'Success':
-        ws_ddm = wb.create_sheet("DDM Valuation", 3)
-        ws_ddm['A1'] = "Dividend Discount Model (DDM)"
+        ws_ddm = wb.create_sheet('DDM Valuation')
+        
+        ws_ddm['A1'] = 'Dividend Discount Model (Gordon Growth)'
         ws_ddm['A1'].font = Font(bold=True, size=12)
+        ws_ddm.merge_cells('A1:D1')
         
         row = 3
-        ddm_items = [
-            ('Latest Dividend per Share', ddm_results.get('latest_dps', 0)),
-            ('Historical Growth Rate', ddm_results.get('historical_growth_rate', 0)),
-            ('Required Return', ddm_results.get('required_return', 0)),
-            ('Expected Next Dividend', ddm_results.get('expected_next_dividend', 0)),
-            ('Intrinsic Value per Share', ddm_results.get('intrinsic_value_per_share', 0)),
-            ('Total Intrinsic Value', ddm_results.get('total_intrinsic_value', 0)),
+        ws_ddm[f'A{row}'] = 'Parameter'
+        ws_ddm[f'B{row}'] = 'Value'
+        ws_ddm[f'A{row}'].fill = header_fill
+        ws_ddm[f'B{row}'].fill = header_fill
+        ws_ddm[f'A{row}'].font = header_font
+        ws_ddm[f'B{row}'].font = header_font
+        
+        row += 1
+        ddm_metrics = [
+            ('Latest DPS', ddm_results.get('latest_dps', 0), '₹#,##0.00'),
+            ('Historical Growth Rate', ddm_results.get('historical_growth_rate', 0)*100, '0.00%'),
+            ('Required Return', ddm_results.get('required_return', 0)*100, '0.00%'),
+            ('Expected Next Dividend', ddm_results.get('expected_next_dividend', 0), '₹#,##0.00'),
+            ('Fair Value per Share', ddm_results.get('value_per_share', 0), '₹#,##0.00')
         ]
         
-        for item_name, item_value in ddm_items:
-            ws_ddm[f'A{row}'] = item_name
-            ws_ddm[f'B{row}'] = item_value
-            row += 1
-        
-        # Dividend history
-        row += 1
-        ws_ddm[f'A{row}'] = "Dividend History"
-        ws_ddm[f'A{row}'].font = Font(bold=True)
-        row += 1
-        
-        ws_ddm[f'A{row}'] = "Year"
-        ws_ddm[f'B{row}'] = "Dividend Amount"
-        row += 1
-        
-        div_years = ddm_results.get('years', [])
-        div_amounts = ddm_results.get('dividend_history', [])
-        for i, (year, amount) in enumerate(zip(div_years, div_amounts)):
-            ws_ddm[f'A{row}'] = year.replace('_', '')
-            ws_ddm[f'B{row}'] = amount
+        for label, value, fmt in ddm_metrics:
+            ws_ddm[f'A{row}'] = label
+            ws_ddm[f'B{row}'] = value
+            ws_ddm[f'B{row}'].number_format = fmt
             row += 1
         
         ws_ddm.column_dimensions['A'].width = 30
         ws_ddm.column_dimensions['B'].width = 20
     
-    # ===== SHEET 5: RIM VALUATION =====
+    # ===== SHEET 5: RIM Results =====
     if rim_results and rim_results.get('status') == 'Success':
-        ws_rim = wb.create_sheet("RIM Valuation", 4)
-        ws_rim['A1'] = "Residual Income Model (RIM)"
+        ws_rim = wb.create_sheet('RIM Valuation')
+        
+        ws_rim['A1'] = 'Residual Income Model'
         ws_rim['A1'].font = Font(bold=True, size=12)
+        ws_rim.merge_cells('A1:D1')
         
         row = 3
-        rim_items = [
-            ('Current Book Value', rim_results.get('current_book_value', 0)),
-            ('Book Value per Share', rim_results.get('book_value_per_share', 0)),
-            ('Current Net Income', rim_results.get('current_net_income', 0)),
-            ('Average ROE', rim_results.get('avg_roe', 0)),
-            ('Average Earnings Growth', rim_results.get('avg_earnings_growth', 0)),
-            ('Required Return', rim_results.get('required_return', 0)),
-            ('PV of Terminal Value', rim_results.get('pv_terminal_value', 0)),
-            ('Intrinsic Value per Share', rim_results.get('intrinsic_value_per_share', 0)),
-            ('Total Intrinsic Value', rim_results.get('total_intrinsic_value', 0)),
+        ws_rim[f'A{row}'] = 'Parameter'
+        ws_rim[f'B{row}'] = 'Value'
+        ws_rim[f'A{row}'].fill = header_fill
+        ws_rim[f'B{row}'].fill = header_fill
+        ws_rim[f'A{row}'].font = header_font
+        ws_rim[f'B{row}'].font = header_font
+        
+        row += 1
+        rim_metrics = [
+            ('Book Value (Equity)', rim_results.get('book_value', 0), '₹#,##0.00 Lacs'),
+            ('Net Income', rim_results.get('net_income', 0), '₹#,##0.00 Lacs'),
+            ('Average ROE', rim_results.get('avg_roe', 0)*100, '0.00%'),
+            ('Average Earnings Growth', rim_results.get('avg_earnings_growth', 0)*100, '0.00%'),
+            ('Required Return', rim_results.get('required_return', 0)*100, '0.00%'),
+            ('Terminal Growth', rim_results.get('terminal_growth', 0)*100, '0.00%'),
+            ('Fair Value per Share', rim_results.get('value_per_share', 0), '₹#,##0.00')
         ]
         
-        for item_name, item_value in rim_items:
-            ws_rim[f'A{row}'] = item_name
-            ws_rim[f'B{row}'] = item_value
+        for label, value, fmt in rim_metrics:
+            ws_rim[f'A{row}'] = label
+            ws_rim[f'B{row}'] = value
+            ws_rim[f'B{row}'].number_format = fmt
             row += 1
         
         ws_rim.column_dimensions['A'].width = 30
         ws_rim.column_dimensions['B'].width = 20
     
     # Save to BytesIO
-    buffer = BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
+    excel_buffer = BytesIO()
+    wb.save(excel_buffer)
+    excel_buffer.seek(0)
     
-    return buffer
+    return excel_buffer
 
 
 # ================================
-# SCREENER MODE DISPLAY FUNCTIONS
+# DISPLAY FUNCTIONS FOR STREAMLIT
 # ================================
 
 def display_screener_financial_summary(financials):
-    """Display financial summary for Screener mode"""
-    st.subheader("📊 Financial Summary (Last 3 Years)")
+    """Display financial data summary in Streamlit"""
+    st.markdown("### 📊 Extracted Financial Data")
     
-    years = financials.get('years', [])
+    col1, col2, col3 = st.columns(3)
     
-    # Create DataFrame for display
-    summary_data = {
-        'Metric': [
-            'Revenue', 'COGS', 'Operating Expenses', 'EBITDA', 'EBIT',
-            'Net Profit', 'Dividends', 'Fixed Assets', 'Inventory',
-            'Receivables', 'Cash', 'Total Equity', 'Total Debt'
-        ],
-        years[0].replace('_', ''): [
-            financials['revenue'][0], financials['cogs'][0], financials['opex'][0],
-            financials['ebitda'][0], financials['ebit'][0], financials['net_profit'][0],
-            financials['dividends'][0], financials['fixed_assets'][0], financials['inventory'][0],
-            financials['receivables'][0], financials['cash'][0], financials['equity'][0],
-            financials['st_debt'][0] + financials['lt_debt'][0]
-        ] if len(years) > 0 else [],
-        years[1].replace('_', ''): [
-            financials['revenue'][1], financials['cogs'][1], financials['opex'][1],
-            financials['ebitda'][1], financials['ebit'][1], financials['net_profit'][1],
-            financials['dividends'][1], financials['fixed_assets'][1], financials['inventory'][1],
-            financials['receivables'][1], financials['cash'][1], financials['equity'][1],
-            financials['st_debt'][1] + financials['lt_debt'][1]
-        ] if len(years) > 1 else [],
-        years[2].replace('_', ''): [
-            financials['revenue'][2], financials['cogs'][2], financials['opex'][2],
-            financials['ebitda'][2], financials['ebit'][2], financials['net_profit'][2],
-            financials['dividends'][2], financials['fixed_assets'][2], financials['inventory'][2],
-            financials['receivables'][2], financials['cash'][2], financials['equity'][2],
-            financials['st_debt'][2] + financials['lt_debt'][2]
-        ] if len(years) > 2 else []
-    }
+    with col1:
+        st.metric("Latest Revenue", f"₹{financials['revenue'][0]:.2f} Lacs")
+        st.metric("Latest EBITDA", f"₹{financials['ebitda'][0]:.2f} Lacs")
     
-    df_summary = pd.DataFrame(summary_data)
-    st.dataframe(df_summary, use_container_width=True)
+    with col2:
+        st.metric("Latest NOPAT", f"₹{financials['nopat'][0]:.2f} Lacs")
+        st.metric("Latest Tax", f"₹{financials['tax'][0]:.2f} Lacs")
+    
+    with col3:
+        st.metric("Total Debt", f"₹{financials['st_debt'][0] + financials['lt_debt'][0]:.2f} Lacs")
+        st.metric("Equity", f"₹{financials['equity'][0]:.2f} Lacs")
+    
+    if financials.get('num_shares'):
+        st.info(f"📈 **Shares Outstanding:** {financials['num_shares']:,}")
 
 
 def display_screener_ddm_results(ddm_results):
-    """Display DDM valuation results"""
+    """Display DDM results in Streamlit"""
     if not ddm_results:
+        st.warning("DDM results not available")
         return
     
-    st.subheader("💰 Dividend Discount Model (DDM) Valuation")
-    
     if ddm_results.get('status') != 'Success':
-        st.warning(f"⚠️ {ddm_results.get('message', 'Unable to calculate DDM')}")
+        st.error(f"❌ {ddm_results.get('message', 'DDM calculation failed')}")
         return
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Latest DPS", f"₹{ddm_results['latest_dps']:.2f}")
-        st.metric("Historical Growth", f"{ddm_results['historical_growth_rate']*100:.1f}%")
+        st.metric("Latest DPS", f"₹{ddm_results.get('latest_dps', 0):.2f}")
     
     with col2:
-        st.metric("Required Return", f"{ddm_results['required_return']*100:.1f}%")
-        st.metric("Expected Next Dividend", f"₹{ddm_results['expected_next_dividend']:.2f}")
+        st.metric("Historical Growth Rate", f"{ddm_results.get('historical_growth_rate', 0)*100:.2f}%")
     
     with col3:
-        st.metric("Intrinsic Value/Share", f"₹{ddm_results['intrinsic_value_per_share']:.2f}")
-        st.metric("Total Value", f"₹{ddm_results['total_intrinsic_value']/1e7:.2f} Cr")
+        st.metric("Required Return", f"{ddm_results.get('required_return', 0)*100:.2f}%")
     
-    # Dividend history chart
-    if ddm_results.get('dividend_history') and ddm_results.get('years'):
-        import plotly.graph_objects as go
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=[y.replace('_', '') for y in ddm_results['years']],
-            y=ddm_results['dividend_history'],
-            name='Dividend Amount',
-            marker_color='#1f77b4'
-        ))
-        fig.update_layout(
-            title="Historical Dividend Trend",
-            xaxis_title="Year",
-            yaxis_title="Dividend Amount (₹ Cr)",
-            height=400
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    st.success(f"### 🎯 Fair Value per Share (DDM): ₹{ddm_results.get('value_per_share', 0):.2f}")
+    
+    st.markdown("**Formula Used:** Gordon Growth Model")
+    st.code(f"Fair Value = D1 / (r - g) = ₹{ddm_results.get('expected_next_dividend', 0):.2f} / ({ddm_results.get('required_return', 0):.2%} - {ddm_results.get('historical_growth_rate', 0):.2%})")
 
 
 def display_screener_rim_results(rim_results):
-    """Display RIM valuation results"""
+    """Display RIM results in Streamlit"""
     if not rim_results:
+        st.warning("RIM results not available")
         return
     
-    st.subheader("📈 Residual Income Model (RIM) Valuation")
-    
     if rim_results.get('status') != 'Success':
-        st.warning(f"⚠️ {rim_results.get('message', 'Unable to calculate RIM')}")
+        st.error(f"❌ {rim_results.get('message', 'RIM calculation failed')}")
         return
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Book Value/Share", f"₹{rim_results['book_value_per_share']:.2f}")
-        st.metric("Average ROE", f"{rim_results['avg_roe']*100:.1f}%")
+        st.metric("Book Value", f"₹{rim_results.get('book_value', 0):.2f} Lacs")
     
     with col2:
-        st.metric("Avg Earnings Growth", f"{rim_results['avg_earnings_growth']*100:.1f}%")
-        st.metric("Required Return", f"{rim_results['required_return']*100:.1f}%")
+        st.metric("Average ROE", f"{rim_results.get('avg_roe', 0)*100:.2f}%")
     
     with col3:
-        st.metric("Intrinsic Value/Share", f"₹{rim_results['intrinsic_value_per_share']:.2f}")
-        st.metric("Total Value", f"₹{rim_results['total_intrinsic_value']/1e7:.2f} Cr")
+        st.metric("Required Return", f"{rim_results.get('required_return', 0)*100:.2f}%")
     
-    # Show residual income breakdown
-    if rim_results.get('residual_incomes') and rim_results.get('pv_residual_incomes'):
-        st.markdown("#### Projected Residual Income")
-        
-        ri_data = {
-            'Year': list(range(1, len(rim_results['residual_incomes']) + 1)),
-            'Residual Income': rim_results['residual_incomes'],
-            'Present Value': rim_results['pv_residual_incomes']
-        }
-        df_ri = pd.DataFrame(ri_data)
-        st.dataframe(df_ri, use_container_width=True)
-
-
-# ================================
-# EXPORT FUNCTIONS
-# ================================
-
-# All export and display functions will be imported from main file
-# This module focuses on Screener-specific parsing and calculations
+    st.success(f"### 🎯 Fair Value per Share (RIM): ₹{rim_results.get('value_per_share', 0):.2f}")
+    
+    st.markdown("**Model:** Residual Income Model")
+    st.markdown(f"**Formula:** Value = Book Value + PV(Residual Income)")
+    st.markdown(f"**Projection Years:** {rim_results.get('projection_years', 0)}")
+    st.markdown(f"**Terminal Growth:** {rim_results.get('terminal_growth', 0)*100:.2f}%")
