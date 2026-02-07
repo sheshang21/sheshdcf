@@ -8724,7 +8724,7 @@ def main():
                             debtor_days_override=debtor_days_override_screener if debtor_days_override_screener > 0 else None,
                             creditor_days_override=creditor_days_override_screener if creditor_days_override_screener > 0 else None,
                             interest_rate_override=interest_rate_override_screener if interest_rate_override_screener > 0 else None,
-                            working_capital_as_pct_revenue=working_capital_as_pct_revenue_screener if working_capital_as_pct_revenue_screener > 0 else None
+                            working_capital_pct_override=working_capital_as_pct_revenue_screener if working_capital_as_pct_revenue_screener > 0 else None
                         )
                         
                         # Calculate WACC (using peer companies for beta)

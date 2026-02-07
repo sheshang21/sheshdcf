@@ -367,7 +367,15 @@ def get_screener_shares_outstanding(df_bs, year_col):
         int: Number of shares
     """
     shares = get_value_from_screener_df(df_bs, 'No. of Equity Shares', year_col)
-    return int(shares) if shares > 0 else 0
+    if shares > 0:
+        return int(shares)
+    
+    # Try without the period
+    shares = get_value_from_screener_df(df_bs, 'No of Equity Shares', year_col)
+    if shares > 0:
+        return int(shares)
+    
+    return 0
 
 
 def get_screener_face_value(df_bs, year_col):
